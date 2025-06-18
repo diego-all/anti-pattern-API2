@@ -2,6 +2,23 @@
 
 API written in Golang with some golang antipatterns.
 
+    ├── db
+    │   ├── db.go
+    │   ├── Dockerfile
+    │   └── init.sql
+    ├── go.mod
+    ├── go.sum
+    ├── handlers
+    │   └── instrument_handler.go
+    ├── main.go
+    ├── models
+    │   └── instrument.go
+    ├── docker-compose.yml
+    ├── Dockerfile
+    ├── README.md
+    └── request.md
+
+
 
 ## Run Database
 
@@ -50,3 +67,7 @@ Docker compose toma el up.sql o init de la ruta directamente en el volumen (Name
     volumes:
       # Monta el archivo init.sql para que PostgreSQL lo ejecute al iniciar
       # - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+
+2 veces , despues de creado el volumen sube mas rapido y no hay connection refused.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
