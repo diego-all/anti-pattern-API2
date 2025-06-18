@@ -6,6 +6,7 @@ services:
     build:
       context: ./db # El contexto de construcción es la nueva carpeta 'db'
       dockerfile: Dockerfile # Busca el Dockerfile dentro de './db'
+    # image: postgres:15-alpine # Usa una imagen oficial de PostgreSQL
     ports:
       - "5432:5432" # Opcional: Mapea el puerto de la DB al host (útil para herramientas externas)
     environment:
@@ -13,30 +14,26 @@ services:
       POSTGRES_PASSWORD: password # Contraseña del usuario
       POSTGRES_DB: mydatabase # Nombre de la base de datos
     volumes:
-      # *** CAMBIO AQUÍ: Ahora usamos un bind mount ***
-      # Se montará la carpeta './db-data/postgres' de tu host al '/var/lib/postgresql/data' del contenedor
-      # Docker creará la carpeta './db-data/postgres' en tu proyecto si no existe.
-      - ./db-data/postgres:/var/lib/postgresql/data:rw
-
-      # Puedes descomentar la siguiente línea SI NO ESTÁS USANDO el COPY init.sql en db/Dockerfile
-      # y quieres montar el init.sql desde una ubicación específica del host.
-      # Sin embargo, como tu db/Dockerfile ya lo copia, esta línea no es necesaria
-      # y causaría el error "not a directory" si se deja activa.
+      # Monta el archivo init.sql para que PostgreSQL lo ejecute al iniciar
       # - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
-
+      # Persiste los datos de la base de datos en un volumen nombrado
+      - pgdata:/var/lib/postgresql/data
   app:
     build:
       context: . # El contexto de construcción es el directorio actual
-      dockerfile: Dockerfile # Usa el Dockerfile de la API (simplificado o multi-stage, según tu elección)
+      dockerfile: Dockerfile # Usa el Dockerfile que acabamos de crear
     ports:
       - "8080:8080" # Mapea el puerto 8080 del host al puerto 8080 del contenedor
     environment:
+      # Asegúrate de que estos valores coincidan con los de tu .env o sean los que esperas
       PORT: 8080
       DATABASE_URL: postgres://user:password@db:5432/mydatabase?sslmode=disable
     depends_on:
       - db # Asegura que la base de datos se inicie antes que la aplicación
+    # Para desarrollo, puedes montar el código fuente para recargas en caliente si usas un observador
+    # volumes:
+    #   - .:/app # Descomenta para montar el volumen para desarrollo
 
-# *** CAMBIO AQUÍ: Eliminamos la sección de volúmenes nombrados ***
-# Ya no necesitamos definir 'pgdata' porque estamos usando un bind mount directo.
-# volumes:
-#   pgdata:
+# NAMED VOLUME
+volumes:
+  pgdata: # Define el volumen nombrado para la persistencia de datos de PostgreSQL
