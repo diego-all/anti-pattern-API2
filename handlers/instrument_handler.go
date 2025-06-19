@@ -190,37 +190,95 @@ func DeleteInstrumentSQLi(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// func GetInstrumentByIDSQLi(w http.ResponseWriter, r *http.Request) {
+
+// 	//id := chi.URLParam(r, "id") will
+// 	id := r.URL.Query().Get("id") // mario
+
+// 	var ins models.Instrument
+
+// 	if id == "" {
+// 		http.Error(w, "El ID del instrumento es requerido", http.StatusBadRequest)
+// 		return
+// 	}
+
+// 	// query := fmt.Sprintf("DELETE FROM instruments WHERE id = '%s'", id) // ¡VULNERABLE!
+// 	query := fmt.Sprintf("SELECT id, name, description FROM instruments WHERE id = '%s'", id) // ¡VULNERABLE!
+
+// 	// db vs database
+
+// 	// Will usa Query(query)
+
+// 	// Ahora usamos db.DBConn.QueryRow() con la query vulnerable
+// 	err := db.DBConn.QueryRowContext(context.Background(), query).
+// 		Scan(&ins.ID, &ins.Name, &ins.Description, &ins.Price, &ins.CreatedAt, &ins.UpdatedAt)
+
+// 	if err != nil {
+// 		http.Error(w, "Instrumento no encontrado o error de base de datos", http.StatusNotFound) // Mensaje genérico
+// 		return
+// 	}
+
+// 	w.Header().Set("Content-Type", "application/json")
+// 	json.NewEncoder(w).Encode(ins)
+
+// }
+
 func GetInstrumentByIDSQLi(w http.ResponseWriter, r *http.Request) {
-
-	//id := chi.URLParam(r, "id") will
-	id := r.URL.Query().Get("id") // mario
-
-	var ins models.Instrument
+	// Obtiene el ID como PARÁMETRO DE CONSULTA (ej. /endpoint?id=valor)
+	id := r.URL.Query().Get("id")
 
 	if id == "" {
 		http.Error(w, "El ID del instrumento es requerido", http.StatusBadRequest)
 		return
 	}
 
-	// query := fmt.Sprintf("DELETE FROM instruments WHERE id = '%s'", id) // ¡VULNERABLE!
-	query := fmt.Sprintf("SELECT id, name, description FROM instruments WHERE id = '%s'", id) // ¡VULNERABLE!
+	// Consulta SQL VULNERABLE: Concatenación directa de ID en la cláusula WHERE.
+	// Un atacante podría usar '3' OR ''='' para que la condición WHERE sea siempre verdadera,
+	// devolviendo todas las filas.
+	query := fmt.Sprintf(`
+        SELECT id, name, description, price, created_at, updated_at
+        FROM instruments WHERE id = '%s'`, id) // ¡VULNERABLE!
 
-	// db vs database
+	fmt.Println("Consulta SQL ejecutada (vulnerable):", query) // Para ver la query inyectada en los logs
 
-	// Will usa Query(query)
-
-	// Ahora usamos db.DBConn.QueryRow() con la query vulnerable
-	err := db.DBConn.QueryRowContext(context.Background(), query).
-		Scan(&ins.ID, &ins.Name, &ins.Description, &ins.Price, &ins.CreatedAt, &ins.UpdatedAt)
-
+	// CAMBIO CLAVE: Usar db.DBConn.QueryContext para esperar múltiples filas
+	rows, err := db.DBConn.QueryContext(context.Background(), query)
 	if err != nil {
-		http.Error(w, "Instrumento no encontrado o error de base de datos", http.StatusNotFound) // Mensaje genérico
+		http.Error(w, fmt.Sprintf("Error al consultar la base de datos: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close() // Es crucial cerrar las filas
+
+	var instruments []models.Instrument
+	found := false // Bandera para saber si se encontró al menos un instrumento
+
+	for rows.Next() {
+		var ins models.Instrument
+		// Asegúrate de que todos los campos del SELECT están siendo escaneados aquí.
+		// Si Price, CreatedAt o UpdatedAt son nulos en la DB para alguna fila inyectada,
+		// o si el payload es malicioso y altera el esquema, esto podría fallar.
+		if err := rows.Scan(&ins.ID, &ins.Name, &ins.Description, &ins.Price, &ins.CreatedAt, &ins.UpdatedAt); err != nil {
+			// Maneja el error de escaneo, podría ser por tipos de datos
+			http.Error(w, fmt.Sprintf("Error al leer los datos del instrumento: %v", err), http.StatusInternalServerError)
+			return
+		}
+		instruments = append(instruments, ins)
+		found = true
+	}
+
+	// Verifica si hubo errores durante la iteración de las filas
+	if err = rows.Err(); err != nil {
+		http.Error(w, fmt.Sprintf("Error en la iteración de resultados: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if !found {
+		http.Error(w, "Instrumento(s) no encontrado(s) o error de base de datos", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ins)
-
+	json.NewEncoder(w).Encode(instruments) // Envía una lista de instrumentos
 }
 
 func GetAllInstrumentsSQLi(w http.ResponseWriter, r *http.Request) {
