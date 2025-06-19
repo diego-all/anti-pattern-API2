@@ -35,6 +35,8 @@ QueryContext (Cuando esperas cero, una o múltiples filas)
 QueryRowContext (Como máximo una fila como resultado)
 
 
+
+
 ## SQL Injection in DELETE Sprintf (Payload codificado)
 
         curl -X DELETE "http://localhost:8080/instruments/vulnerable-sqli?id=3%27%20OR%20%27%27=%27"    FUNCIONO  (DELETE ALL)
@@ -70,6 +72,10 @@ Validación de Entrada Insuficiente: Confiar ciegamente en los datos del usuario
 
 
 ## Harcoded credentials
+
+## ReDOS
+
+## 
 
 
 Security Hotspots

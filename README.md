@@ -2,6 +2,8 @@
 
 API written in Golang with some golang antipatterns.
 
+> Bad Golang Scaffolding "The Standard Go Project Structure"
+
     ├── db
     │   ├── db.go
     │   ├── Dockerfile
@@ -69,3 +71,22 @@ Docker compose toma el up.sql o init de la ruta directamente en el volumen (Name
 
 2 veces , despues de creado el volumen sube mas rapido y no hay connection refused.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+
+status code
+https://go.dev/src/net/http/status.go
+
+
+
+“Accept interfaces, return structs.”
+https://medium.com/capital-one-tech/doing-well-by-doing-bad-writing-bad-code-with-go-part-1-2dbb96ce079a
+https://medium.com/capital-one-tech/doing-well-by-doing-bad-writing-bad-code-with-go-part-2-e270d305c9f7
+
+
+repository
+error handling
+
+coupling cohession
+
+Common Anti-Patterns in Go Web Applications
+https://threedots.tech/post/common-anti-patterns-in-go-web-applications/

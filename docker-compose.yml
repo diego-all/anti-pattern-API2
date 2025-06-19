@@ -12,7 +12,9 @@ services:
       POSTGRES_USER: user # Nombre de usuario de la base de datos
       POSTGRES_PASSWORD: password # Contraseña del usuario
       POSTGRES_DB: mydatabase # Nombre de la base de datos
+      #PG_DATA: /var/lib/postgresql/data
     volumes:
+      # - apigo:/var/lib/postgresql/data #named volume
       # *** CAMBIO AQUÍ: Ahora usamos un bind mount ***
       # Se montará la carpeta './db-data/postgres' de tu host al '/var/lib/postgresql/data' del contenedor
       # Docker creará la carpeta './db-data/postgres' en tu proyecto si no existe.
