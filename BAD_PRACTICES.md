@@ -4,6 +4,8 @@
 
 ## SQL INjection in SELECT Sprintf (cometas+will)
 
+**URL.Query vs URL.Param**
+
 Permite retornar un usuario o varios. Segun sea la clausula.
 
         localhost:9090/instruments/vulnerable-sqligetinst?id=17' OR ''=' (Postman)

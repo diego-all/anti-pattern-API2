@@ -38,7 +38,7 @@ func main() {
 
 		r.Get("/vulnerable-sqligetinst", handlers.GetInstrumentByIDSQLi) // Utiliza verbo, y funciona con curl
 
-		r.Get("/vulnerable-sqligetall", handlers.GetAllInstrumentsSQLi) // Utiliza verbo, y funciona con curl
+		r.Get("/vulnerable-sqligetinsturlparam", handlers.GetInstrumentByIDSQLiURLParam) // Utiliza verbo, y funciona con curl
 
 	})
 
