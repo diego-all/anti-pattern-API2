@@ -2,7 +2,12 @@
 
 
 - SQL Injection in SELECT Sprintf
-- SQL Injection in DELETE Sprintf
+
+
+- SQL Injection in DELETE Sprintf (Payload codificado)
+
+        curl -X DELETE "http://localhost:8080/instruments/vulnerable-sqli?id=3%27%20OR%20%27%27=%27"    FUNCIONO
+
 
 - XSS in handler (productID, err := strconv.Atoi(chi.URLParam(r, "id"))) SANITIZER
 

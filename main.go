@@ -22,11 +22,20 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Route("/instruments", func(r chi.Router) {
+
+		// URLparam
 		r.Get("/", handlers.GetAllInstruments)
 		r.Get("/{id}", handlers.GetInstrumentByID)
 		r.Post("/", handlers.CreateInstrument)
 		r.Put("/{id}", handlers.UpdateInstrument)
 		r.Delete("/{id}", handlers.DeleteInstrument)
+
+		// original r.URL.Query().Get("id")  {id}
+		// r.Delete("/vulnerable/instruments", handlers.DeleteInstrumentSQLi)
+		r.Delete("/vulnerable-sqli", handlers.DeleteInstrumentSQLi) //
+		// URLparam
+		// r.Delete("/vulnerable/instruments/{id}", handlers.DeleteInstrumentSQLi)
+
 	})
 
 	port := os.Getenv("PORT")
