@@ -32,9 +32,13 @@ func main() {
 
 		// original r.URL.Query().Get("id")  {id}
 		// r.Delete("/vulnerable/instruments", handlers.DeleteInstrumentSQLi)
-		r.Delete("/vulnerable-sqli", handlers.DeleteInstrumentSQLi) //
+		r.Delete("/vulnerable-sqli", handlers.DeleteInstrumentSQLi) // Utiliza verbo, y funciona con curl
 		// URLparam
 		// r.Delete("/vulnerable/instruments/{id}", handlers.DeleteInstrumentSQLi)
+
+		r.Get("/vulnerable-sqligetinst", handlers.GetInstrumentByIDSQLi) // Utiliza verbo, y funciona con curl
+
+		r.Get("/vulnerable-sqligetall", handlers.GetAllInstrumentsSQLi) // Utiliza verbo, y funciona con curl
 
 	})
 

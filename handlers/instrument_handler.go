@@ -144,6 +144,7 @@ func DeleteInstrument(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Maybe it's for curl or r.URL.Query().Get("id")
 func DeleteInstrumentSQLi(w http.ResponseWriter, r *http.Request) {
 	// AHORA obtiene el ID como PARÁMETRO DE CONSULTA (ej. /endpoint?id=valor)
 	id := r.URL.Query().Get("id")
@@ -186,6 +187,43 @@ func DeleteInstrumentSQLi(w http.ResponseWriter, r *http.Request) {
 	// Respuesta de éxito similar a tu ejemplo de DeleteUserSQLi
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"error": false}) // o un struct de payload
+
+}
+
+func GetInstrumentByIDSQLi(w http.ResponseWriter, r *http.Request) {
+
+	//id := chi.URLParam(r, "id") will
+	id := r.URL.Query().Get("id") // mario
+
+	var ins models.Instrument
+
+	if id == "" {
+		http.Error(w, "El ID del instrumento es requerido", http.StatusBadRequest)
+		return
+	}
+
+	// query := fmt.Sprintf("DELETE FROM instruments WHERE id = '%s'", id) // ¡VULNERABLE!
+	query := fmt.Sprintf("SELECT id, name, description FROM instruments WHERE id = '%s'", id) // ¡VULNERABLE!
+
+	// db vs database
+
+	// Will usa Query(query)
+
+	// Ahora usamos db.DBConn.QueryRow() con la query vulnerable
+	err := db.DBConn.QueryRowContext(context.Background(), query).
+		Scan(&ins.ID, &ins.Name, &ins.Description, &ins.Price, &ins.CreatedAt, &ins.UpdatedAt)
+
+	if err != nil {
+		http.Error(w, "Instrumento no encontrado o error de base de datos", http.StatusNotFound) // Mensaje genérico
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ins)
+
+}
+
+func GetAllInstrumentsSQLi(w http.ResponseWriter, r *http.Request) {
 
 }
 

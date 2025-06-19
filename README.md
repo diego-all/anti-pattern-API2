@@ -27,8 +27,6 @@ API written in Golang with some golang antipatterns.
     docker-compose down -v --rmi all
     docker-compose up --build -d
 
-
-
     docker exec -it anti-pattern-api2_db_1 psql -U user -d mydatabase
 
 
