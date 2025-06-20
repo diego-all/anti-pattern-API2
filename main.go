@@ -40,6 +40,9 @@ func main() {
 
 		r.Get("/vulnerable-sqligetinsturlparam", handlers.GetInstrumentByIDSQLiURLParam) // Utiliza verbo, y funciona con curl
 
+		// "The XSS case will probably require using the GetInstrumentByID endpoint or overlapping some logic."
+		r.Get("/products/get-xss/{id}", GetProductXSS) // Nuevo endpoint vulnerable
+
 	})
 
 	port := os.Getenv("PORT")

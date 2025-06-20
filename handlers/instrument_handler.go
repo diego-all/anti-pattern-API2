@@ -190,6 +190,7 @@ func DeleteInstrumentSQLi(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// QueryRowContext only return 1 row. Is not exploitable.
 func GetInstrumentByIDSQLiURLParam(w http.ResponseWriter, r *http.Request) {
 
 	//id := chi.URLParam(r, "id") will
@@ -209,7 +210,7 @@ func GetInstrumentByIDSQLiURLParam(w http.ResponseWriter, r *http.Request) {
 
 	// Will usa Query(query)
 
-	// Ahora usamos db.DBConn.QueryRow() con la query vulnerable
+	// Ahora usamos db.DBConn.QueryRow() con las query vulnerable
 	err := db.DBConn.QueryRowContext(context.Background(), query).
 		Scan(&ins.ID, &ins.Name, &ins.Description, &ins.Price, &ins.CreatedAt, &ins.UpdatedAt)
 
