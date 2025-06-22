@@ -32,9 +32,9 @@ services:
       dockerfile: Dockerfile # Usa el Dockerfile de la API (simplificado o multi-stage, según tu elección)
     ports:
       - "8080:8080" # Mapea el puerto 8080 del host al puerto 8080 del contenedor
-    environment:
-      PORT: 8080
-      DATABASE_URL: postgres://user:password@db:5432/mydatabase?sslmode=disable
+    # environment:
+      # PORT: 8080
+      # DATABASE_URL: postgres://user:password@db:5432/mydatabase?sslmode=disable
     depends_on:
       - db # Asegura que la base de datos se inicie antes que la aplicación
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql" // Importamos el paquete estándar database/sql
 	"log"
-	"os"
 	"time"
 
 	// Importamos los drivers de pgx que permiten a database/sql interactuar con PostgreSQL
@@ -19,10 +18,8 @@ var DBConn *sql.DB
 
 // InitDB inicializa la conexión a la base de datos
 func InitDB() {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		log.Fatal("DATABASE_URL no definida en el entorno")
-	}
+
+	dsn := "host=db port=5432 user=user password=password dbname=mydatabase sslmode=disable timezone=UTC connect_timeout=5"
 
 	var err error
 	// Abre la conexión usando el driver "pgx" registrado por pgx/v4/stdlib
