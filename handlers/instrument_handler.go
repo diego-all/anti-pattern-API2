@@ -63,6 +63,33 @@ func GetInstrumentByID(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ins)
 }
 
+// func CreateInstrument(w http.ResponseWriter, r *http.Request) {
+// 	var ins models.Instrument
+// 	if err := json.NewDecoder(r.Body).Decode(&ins); err != nil {
+// 		http.Error(w, "JSON inválido", http.StatusBadRequest)
+// 		return
+// 	}
+
+// 	now := time.Now()
+// 	// Ahora usamos db.DBConn.QueryRow() en lugar de db.Pool.QueryRow() para RETURNING
+// 	err := db.DBConn.QueryRowContext(context.Background(), `
+//         INSERT INTO instruments (name, description, price, created_at, updated_at)
+//         VALUES ($1, $2, $3, $4, $5)
+//         RETURNING id`, ins.Name, ins.Description, ins.Price, now, now).
+// 		Scan(&ins.ID)
+
+// 	if err != nil {
+// 		http.Error(w, "Error al insertar el instrumento", http.StatusInternalServerError)
+// 		return
+// 	}
+
+// 	ins.CreatedAt = now
+// 	ins.UpdatedAt = now
+
+// 	w.Header().Set("Content-Type", "application/json")
+// 	json.NewEncoder(w).Encode(ins)
+// }
+
 func CreateInstrument(w http.ResponseWriter, r *http.Request) {
 	var ins models.Instrument
 	if err := json.NewDecoder(r.Body).Decode(&ins); err != nil {
@@ -71,7 +98,6 @@ func CreateInstrument(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	// Ahora usamos db.DBConn.QueryRow() en lugar de db.Pool.QueryRow() para RETURNING
 	err := db.DBConn.QueryRowContext(context.Background(), `
         INSERT INTO instruments (name, description, price, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5)
@@ -79,7 +105,9 @@ func CreateInstrument(w http.ResponseWriter, r *http.Request) {
 		Scan(&ins.ID)
 
 	if err != nil {
-		http.Error(w, "Error al insertar el instrumento", http.StatusInternalServerError)
+		// 🚨 MALA PRÁCTICA: Se expone el error completo al cliente
+		// Esto es un ejemplo claro de insecure error handling
+		http.Error(w, fmt.Sprintf("Error al insertar el instrumento: %v", err), http.StatusInternalServerError)
 		return
 	}
 
