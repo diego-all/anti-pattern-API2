@@ -30,6 +30,7 @@ API written in Golang with some golang antipatterns.
     docker-compose up --build -d
 
     docker exec -it anti-pattern-api2_db_1 psql -U user -d mydatabase
+    docker exec -it anti-pattern-api2_app_1 /bin/sh
 
 
 **: dial error (dial tcp 172.28.0.2:5432: connect: connection refused)** reintentos del msa, healthceck from docker-compose.yml

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"log"
 	"net/http"
 	"os"
@@ -51,6 +52,35 @@ func main() {
 		port = "8080"
 	}
 
+	// Configuración TLS vulnerable
+	// Esto es específicamente lo que el escáner SAST debería identificar como "uso de un algoritmo criptográfico roto o riesgoso"
+	tlsConfig := &tls.Config{
+		PreferServerCipherSuites: true,
+		CipherSuites: []uint16{
+			// Estos ciphersuites son conocidos por ser débiles o deprecados
+			// e.g., CBC-SHA son vulnerables a ataques como BEAST
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,   // CipherSuite débil
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, // CipherSuite débil
+			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,   // CipherSuite débil
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, // CipherSuite débil
+		},
+		MinVersion: tls.VersionTLS12, // TLS 1.2 es el mínimo, pero los ciphersuites son el punto débil aquí
+		// Otras configuraciones que pueden ser vulnerables:
+		// MaxVersion: tls.VersionTLS12, // Limitar a TLS 1.2 puede ser una mala práctica si TLS 1.3 está disponible
+		// InsecureSkipVerify: true, // NO USAR EN PRODUCCIÓN: deshabilita la verificación de certificados del cliente, muy riesgoso
+	}
+
+	// Crear un servidor HTTP con la configuración TLS personalizada
+	srv := &http.Server{
+		Addr:      ":" + port,
+		Handler:   r,
+		TLSConfig: tlsConfig, // Asignar la configuración TLS vulnerable
+	}
+
 	log.Printf("Servidor iniciado en http://localhost:%s\n", port)
-	http.ListenAndServe(":"+port, r)
+	//http.ListenAndServe(":"+port, r)
+
+	log.Fatal(srv.ListenAndServeTLS("cert.pem", "key.pem"))
 }
