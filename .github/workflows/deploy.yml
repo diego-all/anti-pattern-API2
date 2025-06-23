@@ -1,0 +1,116 @@
+name: Deploy Go App to GCE and Prepare for DAST
+
+on:
+  push:
+    branches:
+      - main # Desencadenar el workflow en cada push a la rama main
+
+env:
+  PROJECT_ID: original-list-453105-d3 # ¡Reemplaza con tu ID de proyecto de GCP!
+  GCE_INSTANCE_NAME: go-vulnerable-app-instance # Nombre de la instancia de GCE
+  GCE_ZONE: us-central1-a # Zona de la instancia de GCE (ej. us-central1-a)
+  GCR_HOSTNAME: gcr.io # O europe-central2-docker.pkg.dev para Artifact Registry
+  DB_IMAGE_NAME: go-instruments-db
+  APP_IMAGE_NAME: go-instruments-app
+  APP_PORT: 8080
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production # Puedes usar un entorno para mayor control
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Authorize Docker to GCR
+        run: gcloud auth configure-docker ${{ env.GCR_HOSTNAME }}
+
+      - name: Build and push DB Docker image
+        run: |
+          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:latest -f db/Dockerfile db/
+          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:latest
+
+      - name: Build and push App Docker image
+        run: |
+          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:latest .
+          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:latest
+
+      - name: Create or update GCE instance
+        id: create-gce
+        run: |
+          # Verificar si la instancia ya existe
+          if gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null; then
+            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe. Deteniendo y reiniciando para aplicar cambios."
+            gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
+            gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
+          else
+            echo "Creando nueva instancia '${{ env.GCE_INSTANCE_NAME }}'."
+            gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
+              --project=${{ env.PROJECT_ID }} \
+              --zone=${{ env.GCE_ZONE }} \
+              --machine-type=e2-medium \
+              --image-family=ubuntu-2204-lts \
+              --image-project=ubuntu-os-cloud \
+              --boot-disk-size=20GB \
+              --boot-disk-type=pd-standard \
+              --tags=http-server,https-server \
+              --metadata=startup-script="#! /bin/bash
+                sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
+                sudo usermod -aG docker \$USER
+                sudo chmod 666 /var/run/docker.sock
+                echo 'Docker y Docker Compose instalados.'
+                "
+            # Esperar un poco para que la instancia inicie y los scripts se ejecuten
+            sleep 30
+          fi
+          # Obtener la IP pública de la instancia y almacenarla para pasos posteriores
+          PUBLIC_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
+            --zone=${{ env.GCE_ZONE }} \
+            --project=${{ env.PROJECT_ID }} \
+            --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+          echo "::notice file=README.md::IP pública de la aplicación: $PUBLIC_IP"
+
+
+      - name: Copy files and deploy with Docker Compose
+        run: |
+          # Copiar docker-compose.yml y los archivos TLS a la instancia
+          gcloud compute scp docker-compose.yml cert.pem key.pem ${{ env.GCE_INSTANCE_NAME }}:~/ \
+            --zone=${{ env.GCE_ZONE }} \
+            --project=${{ env.PROJECT_ID }} \
+            --recurse
+
+          # Actualizar el docker-compose.yml en la instancia para usar las imágenes de GCR
+          # Nota: Esto es crucial. Las imágenes en docker-compose.yml deben apuntar a GCR.
+          # Vamos a modificar el archivo *localmente* y luego copiarlo, o bien,
+          # podrías usar un .env en la instancia con las variables de GCR.
+          # Para simplificar, modificaremos el compose file para este ejemplo.
+          sed -i "s|image: go-instruments-db|image: ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:latest|" docker-compose.yml
+          sed -i "s|image: go-instruments-app|image: ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:latest|" docker-compose.yml
+
+          # Volver a copiar el docker-compose.yml modificado
+          gcloud compute scp docker-compose.yml ${{ env.GCE_INSTANCE_NAME }}:~/ \
+            --zone=${{ env.GCE_ZONE }} \
+            --project=${{ env.PROJECT_ID }}
+
+          # Ejecutar Docker Compose en la instancia
+          gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} \
+            --zone=${{ env.GCE_ZONE }} \
+            --project=${{ env.PROJECT_ID }} \
+            --command="docker compose pull && docker compose up -d"
+
+      - name: Verify application deployment
+        run: |
+          echo "Esperando que la aplicación Go se inicie en http://${{ env.PUBLIC_IP }}:${{ env.APP_PORT }}..."
+          sleep 60 # Dar tiempo a la app para iniciarse y la DB para inicializarse
+          # Intentar acceder a la API para verificar que está viva
+          curl -f --insecure http://${{ env.PUBLIC_IP }}:${{ env.APP_PORT }}/instruments || \
+            (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
+          echo "Aplicación Go desplegada y accesible en http://${{ env.PUBLIC_IP }}:${{ env.APP_PORT }}"
