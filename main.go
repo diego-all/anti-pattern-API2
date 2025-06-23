@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"log"
 	"net/http"
+	"net/http/pprof"
+	_ "net/http/pprof"
 	"os"
 
 	"github.com/go-chi/chi/v5"
@@ -83,4 +85,24 @@ func main() {
 	//http.ListenAndServe(":"+port, r)
 
 	log.Fatal(srv.ListenAndServeTLS("cert.pem", "key.pem"))
+}
+
+// registerPprofRoutes monta manualmente los handlers de pprof en el router de chi.
+// Esto expone los perfiles en /debug/pprof/* sin protección, tal como lo detecta la regla SAST.
+func registerPprofRoutes(r chi.Router) {
+	// Página índice con enlaces a los perfiles
+	r.Get("/debug/pprof/", http.HandlerFunc(pprof.Index))
+
+	// Endpoints básicos que requiere pprof
+	r.Get("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
+	r.Get("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
+	r.Get("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
+	r.Post("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
+	r.Get("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
+
+	// Mapear perfiles adicionales (goroutine, heap, threadcreate, block, etc.)
+	r.Get("/debug/pprof/{name}", func(w http.ResponseWriter, req *http.Request) {
+		name := chi.URLParam(req, "name")
+		pprof.Handler(name).ServeHTTP(w, req)
+	})
 }
