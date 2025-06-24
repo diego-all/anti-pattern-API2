@@ -14,8 +14,9 @@ env:
   DB_IMAGE_NAME: go-instruments-db
   APP_IMAGE_NAME: go-instruments-app
   APP_PORT: 8080
-  DOCKER_HUB_USERNAME: diegoall1990 # Configura esto en Secretos de GitHub
-  DOCKER_HUB_TOKEN: czxczxczxczxczxcxzcxzc     # Configura esto en Secretos de GitHub
+  # Las variables de Docker Hub solo son relevantes si cambias a Docker Hub
+  DOCKER_HUB_USERNAME: diegoall1990
+  DOCKER_HUB_TOKEN: czxczxczxczxczxcxzcxzc
 
 jobs:
   deploy:
@@ -26,35 +27,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --- NUEVO PASO DE AUTENTICACIÓN ---
+      # --- PASO DE AUTENTICACIÓN PARA GOOGLE CLOUD ---
       - name: Authenticate Google Cloud Service Account
-        uses: google-github-actions/auth@v2 # Usamos el action 'auth'
+        # Usa el action 'auth' para autenticar la cuenta de servicio con GCP
+        uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }} # Le pasamos el secreto JSON
-
-      # - name: Set up Google Cloud SDK
-      #   uses: google-github-actions/setup-gcloud@v2
-      #   with:
-      #     project_id: ${{ env.PROJECT_ID }}
-      #     service_account_key: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }} # Credenciales en formato JSON desde los secretos de GitHub
 
       - name: Set up Google Cloud SDK
+        # Configura el SDK de gcloud para interactuar con tu proyecto de GCP
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
-          # Ya no necesitas pasar service_account_key aquí, 'auth' lo manejó
-          # service_account_key: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }} # Elimina o comenta esta línea
-      # --- FIN NUEVO PASO DE AUTENTICACIÓN ---
+          # No es necesario pasar service_account_key aquí si ya usaste google-github-actions/auth
+          # service_account_key: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      # --- FIN PASOS DE AUTENTICACIÓN ---
 
       - name: Authorize Docker to GCR
+        # Autoriza Docker para interactuar con Google Container Registry (GCR)/Artifact Registry
         run: gcloud auth configure-docker ${{ env.GCR_HOSTNAME }}
 
       - name: Build and push DB Docker image
+        # Construye la imagen de la base de datos y la sube a GCR
         run: |
           docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:latest -f db/Dockerfile db/
           docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:latest
 
       - name: Build and push App Docker image
+        # Construye la imagen de la aplicación Go y la sube a GCR
         run: |
           docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:latest .
           docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:latest
@@ -62,7 +63,7 @@ jobs:
       - name: Create or update GCE instance
         id: create-gce
         run: |
-          # Verificar si la instancia ya existe
+          # Verifica si la instancia ya existe. Si existe, la detiene y reinicia. Si no, la crea.
           if gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null; then
             echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe. Deteniendo y reiniciando para aplicar cambios."
             gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
@@ -79,15 +80,18 @@ jobs:
               --boot-disk-type=pd-standard \
               --tags=http-server,https-server \
               --metadata=startup-script="#! /bin/bash
+                # Instala Docker y Docker Compose V2 en la instancia
                 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
+                # Añade el usuario actual (daposadalpractices) al grupo docker para ejecutar comandos sin sudo
                 sudo usermod -aG docker \$USER
+                # Cambia permisos del socket Docker para que el usuario pueda acceder
                 sudo chmod 666 /var/run/docker.sock
                 echo 'Docker y Docker Compose instalados.'
                 "
-            # Esperar un poco para que la instancia inicie y los scripts se ejecuten
-            sleep 30
+            # Esperar un poco para que la instancia inicie y los scripts se ejecuten (pueden tardar más de 30s)
+            sleep 60 # Aumentado el tiempo de espera para asegurar que Docker esté listo
           fi
-          # Obtener la IP pública de la instancia y almacenarla para pasos posteriores
+          # Obtener la IP pública de la instancia y almacenarla como variable de entorno para pasos posteriores
           PUBLIC_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
@@ -95,38 +99,38 @@ jobs:
           echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
           echo "::notice file=README.md::IP pública de la aplicación: $PUBLIC_IP"
 
-
       - name: Copy files and deploy with Docker Compose
+        # Copia el docker-compose.yml y los archivos TLS a la instancia y ejecuta el despliegue
         run: |
-          # Copiar docker-compose.yml y los archivos TLS a la instancia
+          # Copiar docker-compose.yml y los archivos TLS al directorio home del usuario en la instancia
           gcloud compute scp docker-compose.yml cert.pem key.pem ${{ env.GCE_INSTANCE_NAME }}:~/ \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --recurse
 
-          # Actualizar el docker-compose.yml en la instancia para usar las imágenes de GCR
-          # Nota: Esto es crucial. Las imágenes en docker-compose.yml deben apuntar a GCR.
-          # Vamos a modificar el archivo *localmente* y luego copiarlo, o bien,
-          # podrías usar un .env en la instancia con las variables de GCR.
-          # Para simplificar, modificaremos el compose file para este ejemplo.
+          # Actualizar el docker-compose.yml localmente para usar las imágenes de GCR antes de copiarlo
+          # Esto asegura que el archivo que llega a la instancia ya tiene las rutas correctas de las imágenes
           sed -i "s|image: go-instruments-db|image: ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:latest|" docker-compose.yml
           sed -i "s|image: go-instruments-app|image: ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:latest|" docker-compose.yml
 
-          # Volver a copiar el docker-compose.yml modificado
+          # Volver a copiar el docker-compose.yml modificado (sobrescribiendo el anterior)
           gcloud compute scp docker-compose.yml ${{ env.GCE_INSTANCE_NAME }}:~/ \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }}
 
-          # Ejecutar Docker Compose en la instancia
+          # Ejecutar Docker Compose en la instancia.
+          # Crucial: Cambiar al directorio home (~) donde se copiaron los archivos antes de ejecutar docker compose.
+          # Usamos 'docker compose' (plugin) porque es lo que se instala con 'docker-compose-v2'.
           gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
-            --command="docker compose pull && docker compose up -d"
+            --command="cd ~/ && docker compose pull && docker compose up -d" # <-- Corrección aplicada aquí
 
       - name: Verify application deployment
+        # Verifica que la aplicación esté accesible y responda después del despliegue
         run: |
           echo "Esperando que la aplicación Go se inicie en http://${{ env.PUBLIC_IP }}:${{ env.APP_PORT }}..."
-          sleep 60 # Dar tiempo a la app para iniciarse y la DB para inicializarse
+          sleep 60 # Dar tiempo a la app para iniciarse y a la DB para inicializarse y la app para conectarse
           # Intentar acceder a la API para verificar que está viva
           curl -f --insecure http://${{ env.PUBLIC_IP }}:${{ env.APP_PORT }}/instruments || \
             (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
