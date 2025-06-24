@@ -68,7 +68,7 @@ jobs:
               --image-project=ubuntu-os-cloud \
               --boot-disk-size=20GB \
               --boot-disk-type=pd-standard \
-              --tags=http-server,https-server \
+              --tags=http-server,https-server,ssh-go-app \
               --metadata=startup-script="#! /bin/bash
                 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
                 sudo usermod -aG docker \$(whoami)
