@@ -1,0 +1,44 @@
+# docker-compose.prod.yml
+version: '3.8'
+
+services:
+  db:
+    # La imagen se construirá y se empujará con un SHA de commit, pero aquí usamos un placeholder.
+    # El workflow de GitHub Actions sobrescribirá esta línea al copiarlo a la VM.
+    # OJO: La imagen que se va a usar DEBE existir en GCR con el tag adecuado.
+    image: gcr.io/rare-lambda-415802/go-instruments-db:__IMAGE_TAG__ # Placeholder
+
+    ports:
+      - "5432:5432" # Puedes quitar esto si la DB no necesita ser accesible directamente desde fuera de la VM
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydatabase
+    volumes:
+      - db_data:/var/lib/postgresql/data # Usar un volumen nombrado para persistencia en producción
+    healthcheck: # Crucial para la conectividad y orquestación
+      test: ["CMD-SHELL", "pg_isready -U user -d mydatabase -h localhost"] # Usa localhost aquí
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s # Dar tiempo inicial para que postgres arranque antes de chequear
+
+  app:
+    # La imagen se construirá y se empujará con un SHA de commit, pero aquí usamos un placeholder.
+    # El workflow de GitHub Actions sobrescribirá esta línea al copiarlo a la VM.
+    image: gcr.io/rare-lambda-415802/go-instruments-app:__IMAGE_TAG__ # Placeholder
+    ports:
+      - "80:8080" # Mapea el puerto 80 de la GCE al 8080 del contenedor, más estándar para web
+    environment:
+      DB_HOST: db # El nombre del servicio DB dentro de la red Docker Compose
+      DB_PORT: 5432
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_NAME: mydatabase
+      APP_PORT: 8080 # La app sigue escuchando en 8080 internamente
+    depends_on:
+      db:
+        condition: service_healthy # Espera a que la DB pase el healthcheck
+
+volumes:
+  db_data: # Definición del volumen nombrado para la base de datos

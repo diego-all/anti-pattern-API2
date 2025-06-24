@@ -25,6 +25,15 @@ services:
       # Sin embargo, como tu db/Dockerfile ya lo copia, esta línea no es necesaria
       # y causaría el error "not a directory" si se deja activa.
       # - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+# ... dentro de service: db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d mydatabase"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s # Dar tiempo inicial para que postgres arranque antes de chequear
+
+
 
   app:
     build:
