@@ -55,9 +55,9 @@ jobs:
         run: |
           if gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null; then
             echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe. Deteniendo y reiniciando para aplicar cambios."
-            gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet --no-wait || true
+            gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
             sleep 10 # Pequeña espera para asegurar que el comando de stop se registre
-            gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet --no-wait
+            gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
           else
             echo "Creando nueva instancia '${{ env.GCE_INSTANCE_NAME }}'."
             gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
