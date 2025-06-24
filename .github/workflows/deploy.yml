@@ -14,6 +14,8 @@ env:
   DB_IMAGE_NAME: go-instruments-db
   APP_IMAGE_NAME: go-instruments-app
   APP_PORT: 8080
+  DOCKER_HUB_USERNAME: diegoall1990 # Configura esto en Secretos de GitHub
+  DOCKER_HUB_TOKEN: czxczxczxczxczxcxzcxzc     # Configura esto en Secretos de GitHub
 
 jobs:
   deploy:
