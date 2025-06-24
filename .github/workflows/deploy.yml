@@ -4,11 +4,12 @@ on:
   push:
     branches:
       - main # Desencadenar el workflow en cada push a la rama main
+      - feature/bad-practices # <--- Añade esta línea
 
 env:
   PROJECT_ID: original-list-453105-d3 # ¡Reemplaza con tu ID de proyecto de GCP!
   GCE_INSTANCE_NAME: go-vulnerable-app-instance # Nombre de la instancia de GCE
-  GCE_ZONE: us-central1-a # Zona de la instancia de GCE (ej. us-central1-a)
+  GCE_ZONE: us-east1-b # Zona de la instancia de GCE (ej. us-central1-a)
   GCR_HOSTNAME: gcr.io # O europe-central2-docker.pkg.dev para Artifact Registry
   DB_IMAGE_NAME: go-instruments-db
   APP_IMAGE_NAME: go-instruments-app
