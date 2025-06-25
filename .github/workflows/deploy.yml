@@ -24,6 +24,8 @@ jobs:
     env: # Variables específicas para este job
       GCE_INSTANCE_NAME: go-vulnerable-app-instance
       GCE_MACHINE_TYPE: e2-small # Tipo de máquina para el ambiente vulnerable
+      # Asegúrate de haber reservado 'go-vulnerable-app-static-ip' en GCP
+      GCE_STATIC_IP_NAME: go-vulnerable-app-static-ip
 
     steps:
       - name: Checkout repository
@@ -57,13 +59,22 @@ jobs:
       - name: Create or update GCE instance for Bad Practices
         id: create-gce-bad-practices
         run: |
-          if gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null; then
-            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe. Deteniendo y reiniciando para aplicar cambios."
+          # Verificar si la instancia ya tiene la IP estática asignada
+          HAS_STATIC_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
+                          --zone=${{ env.GCE_ZONE }} \
+                          --project=${{ env.PROJECT_ID }} \
+                          --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+
+          # Si la instancia no existe o su IP actual no es la estática, la creamos/reiniciamos con la IP estática
+          if ! gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null || \
+             [ "$HAS_STATIC_IP" != "$(gcloud compute addresses describe ${{ env.GCE_STATIC_IP_NAME }} --region=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --format='value(address)')" ]; then
+
+            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' no existe o su IP no es la estática. Creando/Reiniciando para aplicar cambios."
+            # Si la instancia ya existe, la detenemos antes de intentar cambiar su IP
             gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
-            sleep 10
-            gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
-          else
-            echo "Creando nueva instancia '${{ env.GCE_INSTANCE_NAME }}'."
+            sleep 10 # Pequeña espera para asegurar que el comando de stop se registre
+
+            # Comando de creación o reinicio de instancia, asegurando la asignación de la IP estática
             gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
               --project=${{ env.PROJECT_ID }} \
               --zone=${{ env.GCE_ZONE }} \
@@ -74,14 +85,22 @@ jobs:
               --boot-disk-type=pd-standard \
               --tags=http-server,https-server,ssh-go-app \
               --scopes=https://www.googleapis.com/auth/cloud-platform \
+              --address=${{ env.GCE_STATIC_IP_NAME }} \
               --metadata=startup-script="#! /bin/bash
                 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
                 sudo usermod -aG docker \$(whoami)
                 sudo chmod 666 /var/run/docker.sock
                 echo 'Docker y Docker Compose instalados.'
                 "
-            sleep 60
+            sleep 60 # Dar tiempo a la VM y Docker para arrancar y el startup-script para ejecutarse
+          else
+            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe y tiene la IP estática asignada. Reiniciando para aplicar cambios."
+            gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
+            sleep 10 # Pequeña espera para asegurar que el comando de stop se registre
+            gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
+            sleep 60 # Dar tiempo a la VM y Docker para arrancar y el startup-script para ejecutarse
           fi
+
           echo "Esperando que la instancia GCE '${{ env.GCE_INSTANCE_NAME }}' esté lista para SSH..."
           gcloud compute config-ssh --quiet --project=${{ env.PROJECT_ID }}
 
@@ -148,6 +167,8 @@ jobs:
     env: # Variables específicas para este job
       GCE_INSTANCE_NAME: go-hardenized-app-instance # Nuevo nombre de instancia
       GCE_MACHINE_TYPE: e2-small # Tipo de máquina más económico
+      # Asegúrate de haber reservado 'go-hardenized-app-ip' en GCP
+      GCE_STATIC_IP_NAME: go-hardenized-app-ip
 
     steps:
       - name: Checkout repository
@@ -181,13 +202,22 @@ jobs:
       - name: Create or update GCE instance for Hardenized
         id: create-gce-hardenized
         run: |
-          if gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null; then
-            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe. Deteniendo y reiniciando para aplicar cambios."
+          # Verificar si la instancia ya tiene la IP estática asignada
+          HAS_STATIC_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
+                          --zone=${{ env.GCE_ZONE }} \
+                          --project=${{ env.PROJECT_ID }} \
+                          --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+
+          # Si la instancia no existe o su IP actual no es la estática, la creamos/reiniciamos con la IP estática
+          if ! gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null || \
+             [ "$HAS_STATIC_IP" != "$(gcloud compute addresses describe ${{ env.GCE_STATIC_IP_NAME }} --region=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --format='value(address)')" ]; then
+
+            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' no existe o su IP no es la estática. Creando/Reiniciando para aplicar cambios."
+            # Si la instancia ya existe, la detenemos antes de intentar cambiar su IP
             gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
-            sleep 10
-            gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
-          else
-            echo "Creando nueva instancia '${{ env.GCE_INSTANCE_NAME }}'."
+            sleep 10 # Pequeña espera para asegurar que el comando de stop se registre
+
+            # Comando de creación o reinicio de instancia, asegurando la asignación de la IP estática
             gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
               --project=${{ env.PROJECT_ID }} \
               --zone=${{ env.GCE_ZONE }} \
@@ -198,16 +228,22 @@ jobs:
               --boot-disk-type=pd-standard \
               --tags=http-server,https-server,ssh-go-app \
               --scopes=https://www.googleapis.com/auth/cloud-platform \
+              --address=${{ env.GCE_STATIC_IP_NAME }} \
               --metadata=startup-script="#! /bin/bash
                 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
                 sudo usermod -aG docker \$(whoami)
                 sudo chmod 666 /var/run/docker.sock
                 echo 'Docker y Docker Compose instalados.'
                 "
-                \
-              --address=go-hardenized-app-ip # ¡Añade esta línea con el nombre de tu IP reservada!
+            sleep 60
+          else
+            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe y tiene la IP estática asignada. Reiniciando para aplicar cambios."
+            gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
+            sleep 10 # Pequeña espera para asegurar que el comando de stop se registre
+            gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
             sleep 60
           fi
+          
           echo "Esperando que la instancia GCE '${{ env.GCE_INSTANCE_NAME }}' esté lista para SSH..."
           gcloud compute config-ssh --quiet --project=${{ env.PROJECT_ID }}
 
