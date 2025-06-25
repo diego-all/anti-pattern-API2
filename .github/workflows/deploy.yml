@@ -186,8 +186,6 @@ jobs:
             (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
           echo "Aplicación Go (Bad Practices) desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
 
-  ---
-
   # Nuevo Job para la rama "hardenized" - usando e2-small
   deploy-hardenized:
     if: github.ref == 'refs/heads/feature/hardenized'
