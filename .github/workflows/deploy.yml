@@ -5,20 +5,25 @@ on:
     branches:
       - main
       - feature/bad-practices
+      - feature/hardenized # Agregamos la nueva rama de despliegue
 
 env:
   PROJECT_ID: rare-lambda-415802
-  GCE_INSTANCE_NAME: go-vulnerable-app-instance
-  GCE_ZONE: us-east1-b
+  GCE_ZONE: us-east1-b # La zona puede ser la misma para ambas instancias
   GCR_HOSTNAME: gcr.io
   DB_IMAGE_NAME: go-instruments-db
   APP_IMAGE_NAME: go-instruments-app
   APP_PORT: 8080 # Puerto de la aplicación internamente
 
 jobs:
-  deploy:
+  # Job para la rama "bad-practices" (y main) - usando e2-medium
+  deploy-bad-practices:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/bad-practices'
     runs-on: ubuntu-latest
-    environment: production
+    environment: production # Puedes crear un ambiente "bad-practices" si quieres control granular
+    env: # Variables específicas para este job
+      GCE_INSTANCE_NAME: go-vulnerable-app-instance
+      GCE_MACHINE_TYPE: e2-medium # Tipo de máquina para el ambiente vulnerable
 
     steps:
       - name: Checkout repository
@@ -34,35 +39,35 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      - name: Authorize Docker to GCR # Este paso es para el runner de GitHub Actions, NO para la VM de GCE
+      - name: Authorize Docker to GCR
         run: gcloud auth configure-docker ${{ env.GCR_HOSTNAME }}
 
       - name: Build and push DB Docker image
         run: |
-          IMAGE_TAG="${{ github.sha }}" # Usamos el SHA del commit para etiquetar la imagen
+          IMAGE_TAG="${{ github.sha }}"
           docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:"${IMAGE_TAG}" -f db/Dockerfile db/
           docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:"${IMAGE_TAG}"
 
       - name: Build and push App Docker image
         run: |
-          IMAGE_TAG="${{ github.sha }}" # Usamos el SHA del commit para etiquetar la imagen
+          IMAGE_TAG="${{ github.sha }}"
           docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:"${IMAGE_TAG}" .
           docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:"${IMAGE_TAG}"
 
-      - name: Create or update GCE instance
-        id: create-gce
+      - name: Create or update GCE instance for Bad Practices
+        id: create-gce-bad-practices
         run: |
           if gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null; then
             echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe. Deteniendo y reiniciando para aplicar cambios."
             gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
-            sleep 10 # Pequeña espera para asegurar que el comando de stop se registre
+            sleep 10
             gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
           else
             echo "Creando nueva instancia '${{ env.GCE_INSTANCE_NAME }}'."
             gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
               --project=${{ env.PROJECT_ID }} \
               --zone=${{ env.GCE_ZONE }} \
-              --machine-type=e2-medium \
+              --machine-type=${{ env.GCE_MACHINE_TYPE }} \
               --image-family=ubuntu-2204-lts \
               --image-project=ubuntu-os-cloud \
               --boot-disk-size=20GB \
@@ -75,23 +80,20 @@ jobs:
                 sudo chmod 666 /var/run/docker.sock
                 echo 'Docker y Docker Compose instalados.'
                 "
-            sleep 60 # Dar tiempo a la VM y Docker para arrancar y el startup-script para ejecutarse
+            sleep 60
           fi
           echo "Esperando que la instancia GCE '${{ env.GCE_INSTANCE_NAME }}' esté lista para SSH..."
-          # Corrección: Se elimina --zone
           gcloud compute config-ssh --quiet --project=${{ env.PROJECT_ID }}
 
-          # INICIO DE LA CORRECCIÓN CRÍTICA: Bucle de reintentos SSH
           ATTEMPTS=0
-          MAX_ATTEMPTS=15 # Aumentar los intentos para mayor robustez
-          SLEEP_TIME=20   # Aumentar el tiempo de espera entre intentos
+          MAX_ATTEMPTS=15
+          SLEEP_TIME=20
 
           while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
             echo "Intento $((ATTEMPTS + 1)) de $MAX_ATTEMPTS: Probando conexión SSH..."
-            # El --quiet evita la salida ruidosa de ssh en cada intento fallido
             if gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --command="echo 'Instancia SSH lista.'" --quiet; then
               echo "Conexión SSH exitosa."
-              break # Salir del bucle si la conexión es exitosa
+              break
             else
               echo "Fallo al conectar SSH. Reintentando en ${SLEEP_TIME} segundos..."
               ATTEMPTS=$((ATTEMPTS + 1))
@@ -103,41 +105,161 @@ jobs:
             echo "ERROR: Fallo al conectar SSH después de $MAX_ATTEMPTS intentos. La instancia podría no estar accesible."
             exit 1
           fi
-          # FIN DE LA CORRECCIÓN CRÍTICA
 
           PUBLIC_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
           echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
-          echo "::notice file=README.md::IP pública de la aplicación: $PUBLIC_IP"
+          echo "::notice file=README.md::IP pública de la aplicación Bad Practices: $PUBLIC_IP"
 
       - name: Copy docker-compose.prod.yml and Deploy
         run: |
-          IMAGE_TAG="${{ github.sha }}" # Obtén el SHA del commit
-          # Copiar docker-compose.prod.yml y los archivos TLS a la instancia
+          IMAGE_TAG="${{ github.sha }}"
           gcloud compute scp docker-compose.prod.yml cert.pem key.pem ${{ env.GCE_INSTANCE_NAME }}:~/ \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --recurse
 
-          # Conectarse a la instancia, autenticar Docker, reemplazar el placeholder de la imagen, JALAR IMAGENES y desplegar
           gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --command="
               cd ~/ && \
-              # Autenticar Docker con GCR/Artifact Registry usando las credenciales de la VM
               gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
               sed -i 's|__IMAGE_TAG__|${IMAGE_TAG}|g' docker-compose.prod.yml && \
               docker compose -f docker-compose.prod.yml pull && \
               docker compose -f docker-compose.prod.yml up -d
             "
 
-      - name: Verify application deployment
+      - name: Verify application deployment (Bad Practices)
         run: |
-          echo "Esperando que la aplicación Go se inicie en https://${{ env.PUBLIC_IP }}:80..."
-          sleep 60 # Dar tiempo a la app para iniciarse y la DB para inicializarse
+          echo "Esperando que la aplicación Go (Bad Practices) se inicie en https://${{ env.PUBLIC_IP }}:80..."
+          sleep 60
           curl -f -k https://${{ env.PUBLIC_IP }}:80/instruments || \
             (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
-          echo "Aplicación Go desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
+          echo "Aplicación Go (Bad Practices) desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
+
+  # Nuevo Job para la rama "hardenized" - usando e2-small
+  deploy-hardenized:
+    if: github.ref == 'refs/heads/feature/hardenized'
+    runs-on: ubuntu-latest
+    environment: hardened # Puedes crear un ambiente "hardenized" para distinguir en GitHub
+    env: # Variables específicas para este job
+      GCE_INSTANCE_NAME: go-hardenized-app-instance # Nuevo nombre de instancia
+      GCE_MACHINE_TYPE: e2-small # Tipo de máquina más económico
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate Google Cloud Service Account
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Authorize Docker to GCR
+        run: gcloud auth configure-docker ${{ env.GCR_HOSTNAME }}
+
+      - name: Build and push DB Docker image
+        run: |
+          IMAGE_TAG="${{ github.sha }}"
+          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:"${IMAGE_TAG}" -f db/Dockerfile db/
+          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:"${IMAGE_TAG}"
+
+      - name: Build and push App Docker image
+        run: |
+          IMAGE_TAG="${{ github.sha }}"
+          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:"${IMAGE_TAG}" .
+          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:"${IMAGE_TAG}"
+
+      - name: Create or update GCE instance for Hardenized
+        id: create-gce-hardenized
+        run: |
+          if gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null; then
+            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe. Deteniendo y reiniciando para aplicar cambios."
+            gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
+            sleep 10
+            gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
+          else
+            echo "Creando nueva instancia '${{ env.GCE_INSTANCE_NAME }}'."
+            gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
+              --project=${{ env.PROJECT_ID }} \
+              --zone=${{ env.GCE_ZONE }} \
+              --machine-type=${{ env.GCE_MACHINE_TYPE }} \
+              --image-family=ubuntu-2204-lts \
+              --image-project=ubuntu-os-cloud \
+              --boot-disk-size=20GB \
+              --boot-disk-type=pd-standard \
+              --tags=http-server,https-server,ssh-go-app \
+              --scopes=https://www.googleapis.com/auth/cloud-platform \
+              --metadata=startup-script="#! /bin/bash
+                sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
+                sudo usermod -aG docker \$(whoami)
+                sudo chmod 666 /var/run/docker.sock
+                echo 'Docker y Docker Compose instalados.'
+                "
+            sleep 60
+          fi
+          echo "Esperando que la instancia GCE '${{ env.GCE_INSTANCE_NAME }}' esté lista para SSH..."
+          gcloud compute config-ssh --quiet --project=${{ env.PROJECT_ID }}
+
+          ATTEMPTS=0
+          MAX_ATTEMPTS=15
+          SLEEP_TIME=20
+
+          while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+            echo "Intento $((ATTEMPTS + 1)) de $MAX_ATTEMPTS: Probando conexión SSH..."
+            if gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --command="echo 'Instancia SSH lista.'" --quiet; then
+              echo "Conexión SSH exitosa."
+              break
+            else
+              echo "Fallo al conectar SSH. Reintentando en ${SLEEP_TIME} segundos..."
+              ATTEMPTS=$((ATTEMPTS + 1))
+              sleep $SLEEP_TIME
+            fi
+          done
+
+          if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
+            echo "ERROR: Fallo al conectar SSH después de $MAX_ATTEMPTS intentos. La instancia podría no estar accesible."
+            exit 1
+          fi
+
+          PUBLIC_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
+            --zone=${{ env.GCE_ZONE }} \
+            --project=${{ env.PROJECT_ID }} \
+            --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+          echo "::notice file=README.md::IP pública de la aplicación Hardenized: $PUBLIC_IP"
+
+      - name: Copy docker-compose.prod.yml and Deploy
+        run: |
+          IMAGE_TAG="${{ github.sha }}"
+          gcloud compute scp docker-compose.prod.yml cert.pem key.pem ${{ env.GCE_INSTANCE_NAME }}:~/ \
+            --zone=${{ env.GCE_ZONE }} \
+            --project=${{ env.PROJECT_ID }} \
+            --recurse
+
+          gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} \
+            --zone=${{ env.GCE_ZONE }} \
+            --project=${{ env.PROJECT_ID }} \
+            --command="
+              cd ~/ && \
+              gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
+              sed -i 's|__IMAGE_TAG__|${IMAGE_TAG}|g' docker-compose.prod.yml && \
+              docker compose -f docker-compose.prod.yml pull && \
+              docker compose -f docker-compose.prod.yml up -d
+            "
+
+      - name: Verify application deployment (Hardenized)
+        run: |
+          echo "Esperando que la aplicación Go (Hardenized) se inicie en https://${{ env.PUBLIC_IP }}:80..."
+          sleep 60
+          curl -f -k https://${{ env.PUBLIC_IP }}:80/instruments || \
+            (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
+          echo "Aplicación Go (Hardenized) desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
