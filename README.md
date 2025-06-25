@@ -91,3 +91,31 @@ coupling cohession
 
 Common Anti-Patterns in Go Web Applications
 https://threedots.tech/post/common-anti-patterns-in-go-web-applications/
+
+
+DEPLOYMENT
+
+Docker-compose
+
+artifact gcR
+
+Autenticación de Docker en la VM: El comando gcloud auth configure-docker se ejecuta en el runner de GitHub Actions, no en la instancia de GCE. La instancia de GCE necesita su propia forma de autenticarse con Docker. Esto se logra mediante los scopes y la cuenta de servicio.
+
+
+docker exec -it runner-db-1 psql -U user -d mydatabase
+
+
+
+# SQLi
+
+fetch("https://35.227.95.135/instruments/vulnerable-sqli?id=3' OR ''='", {
+  method: "DELETE",
+})
+.then(res => res.text())
+.then(data => console.log(data))
+.catch(err => console.error(err));
+
+🔹 RESTer (Firefox)
+🔹 Postman Web o Extensión Chrome
+
+
