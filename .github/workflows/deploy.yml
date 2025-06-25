@@ -34,7 +34,7 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      - name: Authorize Docker to GCR
+      - name: Authorize Docker to GCR # Este paso es para el runner de GitHub Actions, NO para la VM de GCE
         run: gcloud auth configure-docker ${{ env.GCR_HOSTNAME }}
 
       - name: Build and push DB Docker image
@@ -121,12 +121,14 @@ jobs:
             --project=${{ env.PROJECT_ID }} \
             --recurse
 
-          # Conectarse a la instancia y reemplazar el placeholder de la imagen, luego desplegar
+          # Conectarse a la instancia, autenticar Docker, reemplazar el placeholder de la imagen, JALAR IMAGENES y desplegar
           gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --command="
               cd ~/ && \
+              # Autenticar Docker con GCR/Artifact Registry usando las credenciales de la VM
+              gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
               sed -i 's|__IMAGE_TAG__|${IMAGE_TAG}|g' docker-compose.prod.yml && \
               docker compose -f docker-compose.prod.yml pull && \
               docker compose -f docker-compose.prod.yml up -d
