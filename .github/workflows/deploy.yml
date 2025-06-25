@@ -68,7 +68,7 @@ jobs:
               --boot-disk-size=20GB \
               --boot-disk-type=pd-standard \
               --tags=http-server,https-server,ssh-go-app \
-              --scopes=https://www.googleapis.com/auth/cloud-platform \
+              --scopes=https://www.googleapis.com/auth/cloud-platform \ # Este scope otorga acceso amplio a servicios de GCP
               --metadata=startup-script="#! /bin/bash
                 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
                 sudo usermod -aG docker \$(whoami)
@@ -121,12 +121,14 @@ jobs:
             --project=${{ env.PROJECT_ID }} \
             --recurse
 
-          # Conectarse a la instancia y reemplazar el placeholder de la imagen, luego desplegar
+          # Conectarse a la instancia, autenticar Docker y reemplazar el placeholder de la imagen, luego desplegar
           gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --command="
               cd ~/ && \
+              # Autenticar Docker con GCR/Artifact Registry usando las credenciales de la VM
+              gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
               sed -i 's|__IMAGE_TAG__|${IMAGE_TAG}|g' docker-compose.prod.yml && \
               docker compose -f docker-compose.prod.yml pull && \
               docker compose -f docker-compose.prod.yml up -d
