@@ -80,7 +80,30 @@ jobs:
           echo "Esperando que la instancia GCE '${{ env.GCE_INSTANCE_NAME }}' esté lista para SSH..."
           # Corrección: Se elimina --zone
           gcloud compute config-ssh --quiet --project=${{ env.PROJECT_ID }}
-          gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --command="echo 'Instancia SSH lista.'" || { echo "Fallo al conectar SSH"; exit 1; }
+
+          # --- INICIO DE LA CORRECCIÓN CRÍTICA: Bucle de reintentos SSH ---
+          ATTEMPTS=0
+          MAX_ATTEMPTS=15 # Aumentar los intentos para mayor robustez
+          SLEEP_TIME=20   # Aumentar el tiempo de espera entre intentos
+
+          while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+            echo "Intento $((ATTEMPTS + 1)) de $MAX_ATTEMPTS: Probando conexión SSH..."
+            # El --quiet evita la salida ruidosa de ssh en cada intento fallido
+            if gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --command="echo 'Instancia SSH lista.'" --quiet; then
+              echo "Conexión SSH exitosa."
+              break # Salir del bucle si la conexión es exitosa
+            else
+              echo "Fallo al conectar SSH. Reintentando en ${SLEEP_TIME} segundos..."
+              ATTEMPTS=$((ATTEMPTS + 1))
+              sleep $SLEEP_TIME
+            fi
+          done
+
+          if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
+            echo "ERROR: Fallo al conectar SSH después de $MAX_ATTEMPTS intentos. La instancia podría no estar accesible."
+            exit 1
+          fi
+          # --- FIN DE LA CORRECCIÓN CRÍTICA ---
 
           PUBLIC_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
