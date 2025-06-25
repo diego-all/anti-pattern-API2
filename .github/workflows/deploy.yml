@@ -23,7 +23,7 @@ jobs:
     environment: production # Puedes crear un ambiente "bad-practices" si quieres control granular
     env: # Variables específicas para este job
       GCE_INSTANCE_NAME: go-vulnerable-app-instance
-      GCE_MACHINE_TYPE: e2-medium # Tipo de máquina para el ambiente vulnerable
+      GCE_MACHINE_TYPE: e2-small # Tipo de máquina para el ambiente vulnerable
 
     steps:
       - name: Checkout repository
@@ -204,6 +204,8 @@ jobs:
                 sudo chmod 666 /var/run/docker.sock
                 echo 'Docker y Docker Compose instalados.'
                 "
+                \
+              --address=go-hardenized-app-ip # ¡Añade esta línea con el nombre de tu IP reservada!
             sleep 60
           fi
           echo "Esperando que la instancia GCE '${{ env.GCE_INSTANCE_NAME }}' esté lista para SSH..."
