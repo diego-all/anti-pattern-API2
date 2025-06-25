@@ -68,7 +68,7 @@ jobs:
               --boot-disk-size=20GB \
               --boot-disk-type=pd-standard \
               --tags=http-server,https-server,ssh-go-app \
-              --scopes=https://www.googleapis.com/auth/cloud-platform \ # <--- AÑADIDO: Este scope otorga acceso amplio a servicios de GCP
+              --scopes=https://www.googleapis.com/auth/cloud-platform \
               --metadata=startup-script="#! /bin/bash
                 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
                 sudo usermod -aG docker \$(whoami)
