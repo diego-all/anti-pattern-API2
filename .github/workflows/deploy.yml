@@ -136,8 +136,8 @@ jobs:
 
       - name: Verify application deployment
         run: |
-          echo "Esperando que la aplicación Go se inicie en http://${{ env.PUBLIC_IP }}:80..."
+          echo "Esperando que la aplicación Go se inicie en https://${{ env.PUBLIC_IP }}:80..."
           sleep 60 # Dar tiempo a la app para iniciarse y la DB para inicializarse
-          curl -f --insecure http://${{ env.PUBLIC_IP }}/instruments || \
+          curl -f -k https://${{ env.PUBLIC_IP }}:80/instruments || \
             (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
-          echo "Aplicación Go desplegada y accesible en http://${{ env.PUBLIC_IP }}"
+          echo "Aplicación Go desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
