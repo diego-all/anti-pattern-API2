@@ -45,6 +45,9 @@ func main() {
 		// from XSS4
 		// r.Get("/products/get-xss/{id}", GetProductXSS) // Nuevo endpoint vulnerable
 
+		// NO FUNCIONO ANTERIORMENTE, VALIDAR DE NUEVO!!!
+		r.Put("/vulnerable-sqligetinst-put", handlers.GetInstrumentByIDSQLiPut) // Utiliza verbo, y funciona con curl
+
 	})
 
 	port := os.Getenv("PORT")
