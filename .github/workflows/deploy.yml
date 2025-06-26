@@ -10,6 +10,7 @@ on:
 env:
   PROJECT_ID: rare-lambda-415802
   GCE_ZONE: us-east1-b # La zona puede ser la misma para ambas instancias
+  GCE_REGION: us-east1 # <--- AGREGADO: Define la región para operaciones de IP estática
   GCR_HOSTNAME: gcr.io
   DB_IMAGE_NAME: go-instruments-db
   APP_IMAGE_NAME: go-instruments-app
@@ -21,10 +22,9 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/bad-practices'
     runs-on: ubuntu-latest
     environment: production # Puedes crear un ambiente "bad-practices" si quieres control granular
-    env: # Variables específicas para este job
+    env: # Variables específicas para este job (se heredan las globales, pero estas pueden sobrescribirlas)
       GCE_INSTANCE_NAME: go-vulnerable-app-instance
-      GCE_MACHINE_TYPE: e2-medium # Tipo de máquina para el ambiente vulnerable
-      # Asegúrate de haber reservado 'go-vulnerable-app-static-ip' en GCP
+      GCE_MACHINE_TYPE: e2-small # Tipo de máquina para el ambiente vulnerable
       GCE_STATIC_IP_NAME: go-vulnerable-app-static-ip
 
     steps:
@@ -64,7 +64,6 @@ jobs:
                             --project=${{ env.PROJECT_ID }} &> /dev/null; echo $?)
 
           if [ "$INSTANCE_EXISTS" -ne 0 ]; then
-            # La instancia no existe, la creamos con la IP estática
             echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' no existe. Creando nueva instancia con IP estática."
             gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
               --project=${{ env.PROJECT_ID }} \
@@ -83,15 +82,15 @@ jobs:
                 sudo chmod 666 /var/run/docker.sock
                 echo 'Docker y Docker Compose instalados.'
                 "
-            sleep 60 # Dar tiempo a la VM y Docker para arrancar y el startup-script para ejecutarse
+            sleep 60
           else
-            # La instancia existe, verificamos si tiene la IP estática correcta
             CURRENT_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
                           --zone=${{ env.GCE_ZONE }} \
                           --project=${{ env.PROJECT_ID }} \
                           --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+            # CORRECCIÓN: Usar GCE_REGION en lugar de GCE_ZONE para describir la dirección estática
             RESERVED_IP=$(gcloud compute addresses describe ${{ env.GCE_STATIC_IP_NAME }} \
-                           --region=${{ env.GCE_ZONE }} \
+                           --region=${{ env.GCE_REGION }} \
                            --project=${{ env.PROJECT_ID }} \
                            --format='value(address)')
 
@@ -194,7 +193,6 @@ jobs:
     env: # Variables específicas para este job
       GCE_INSTANCE_NAME: go-hardenized-app-instance # Nuevo nombre de instancia
       GCE_MACHINE_TYPE: e2-small # Tipo de máquina más económico
-      # Asegúrate de haber reservado 'go-hardenized-app-ip' en GCP
       GCE_STATIC_IP_NAME: go-hardenized-app-ip
 
     steps:
@@ -229,13 +227,11 @@ jobs:
       - name: Create or update GCE instance for Hardenized
         id: create-gce-hardenized
         run: |
-          # Verificar si la instancia ya existe
           INSTANCE_EXISTS=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
                             --zone=${{ env.GCE_ZONE }} \
                             --project=${{ env.PROJECT_ID }} &> /dev/null; echo $?)
 
           if [ "$INSTANCE_EXISTS" -ne 0 ]; then
-            # La instancia no existe, la creamos con la IP estática
             echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' no existe. Creando nueva instancia con IP estática."
             gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
               --project=${{ env.PROJECT_ID }} \
@@ -257,13 +253,13 @@ jobs:
                 "
             sleep 60
           else
-            # La instancia existe, verificamos si tiene la IP estática correcta
             CURRENT_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
                           --zone=${{ env.GCE_ZONE }} \
                           --project=${{ env.PROJECT_ID }} \
                           --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+            # CORRECCIÓN: Usar GCE_REGION en lugar de GCE_ZONE para describir la dirección estática
             RESERVED_IP=$(gcloud compute addresses describe ${{ env.GCE_STATIC_IP_NAME }} \
-                           --region=${{ env.GCE_ZONE }} \
+                           --region=${{ env.GCE_REGION }} \
                            --project=${{ env.PROJECT_ID }} \
                            --format='value(address)')
 
@@ -272,7 +268,7 @@ jobs:
               gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
               sleep 10
               gcloud compute instances delete ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
-              sleep 10 # Dar tiempo para que la eliminación se propague
+              sleep 10
               gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
                 --project=${{ env.PROJECT_ID }} \
                 --zone=${{ env.GCE_ZONE }} \
