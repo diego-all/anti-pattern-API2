@@ -20,9 +20,10 @@ func AppRoutes() http.Handler {
 			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 			// HSTS (HTTP Strict Transport Security) para forzar HTTPS
 			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
-			next.ServeHTTP(w, r)
 			// Añadir X-Content-Type-Options: nosniff para prevenir content sniffing
 			w.Header().Set("X-Content-Type-Options", "nosniff")
+
+			next.ServeHTTP(w, r)
 		})
 	})
 
