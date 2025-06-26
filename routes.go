@@ -16,7 +16,9 @@ func AppRoutes() http.Handler {
 	// Middleware para mitigar Spectre agregando la cabecera de protección
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// 1. Cabecera para mitigar Spectre (CORP)
 			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
 			next.ServeHTTP(w, r)
 		})
 	})
