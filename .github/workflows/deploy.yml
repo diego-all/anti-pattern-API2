@@ -24,7 +24,7 @@ jobs:
     environment: production # Puedes crear un ambiente "bad-practices" si quieres control granular
     env: # Variables específicas para este job (se heredan las globales, pero estas pueden sobrescribirlas)
       GCE_INSTANCE_NAME: go-vulnerable-app-instance
-      GCE_MACHINE_TYPE: e2-small # Tipo de máquina para el ambiente vulnerable
+      GCE_MACHINE_TYPE: e2-micro # Tipo de máquina para el ambiente vulnerable
       GCE_STATIC_IP_NAME: go-vulnerable-app-static-ip
 
     steps:
@@ -192,7 +192,7 @@ jobs:
     environment: hardened # Puedes crear un ambiente "hardenized" para distinguir en GitHub
     env: # Variables específicas para este job
       GCE_INSTANCE_NAME: go-hardenized-app-instance # Nuevo nombre de instancia
-      GCE_MACHINE_TYPE: e2-small # Tipo de máquina más económico
+      GCE_MACHINE_TYPE: e2-micro # Tipo de máquina más económico
       GCE_STATIC_IP_NAME: go-hardenized-app-ip
 
     steps:

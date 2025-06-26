@@ -13,6 +13,14 @@ import (
 func AppRoutes() http.Handler {
 	r := chi.NewRouter() // Inicializa el router Chi aquí, como solicitaste.
 
+	// Middleware para mitigar Spectre agregando la cabecera de protección
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+			next.ServeHTTP(w, r)
+		})
+	})
+
 	// Configuración de CORS
 	// Esto es importante para permitir solicitudes desde diferentes orígenes,
 	// lo cual es común en entornos de desarrollo o APIs públicas.
