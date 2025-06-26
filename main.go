@@ -46,7 +46,7 @@ func main() {
 		// r.Get("/products/get-xss/{id}", GetProductXSS) // Nuevo endpoint vulnerable
 
 		// NO FUNCIONO ANTERIORMENTE, VALIDAR DE NUEVO!!!
-		r.Put("/vulnerable-sqligetinst-put", handlers.GetInstrumentByIDSQLiPut) // Utiliza verbo, y funciona con curl
+		//r.Put("/vulnerable-sqligetinst-put", handlers.GetInstrumentByIDSQLiPut) // Utiliza verbo, y funciona con curl
 
 	})
 
