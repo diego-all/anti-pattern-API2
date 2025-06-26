@@ -11,6 +11,7 @@ RUN go mod download
 
 # Copia todo el código fuente de la aplicación
 COPY main.go .
+COPY routes.go .
 COPY handlers/ ./handlers/
 COPY models/ ./models/
 COPY db/ ./db/
