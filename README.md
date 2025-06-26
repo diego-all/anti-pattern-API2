@@ -119,3 +119,10 @@ fetch("https://35.227.95.135/instruments/vulnerable-sqli?id=3' OR ''='", {
 🔹 Postman Web o Extensión Chrome
 
 
+Instancia 'go-hardenized-app-instance' no existe. Creando nueva instancia con IP estática.
+WARNING: You have selected a disk size of under [200GB]. This may result in poor I/O performance. For more information, see: https://developers.google.com/compute/docs/disks#performance.
+Created [https://www.googleapis.com/compute/v1/projects/rare-lambda-415802/zones/us-east1-b/instances/go-hardenized-app-instance].
+WARNING: Some requests generated warnings:
+ - Disk size: '20 GB' is larger than image size: '10 GB'. You might need to resize the root repartition manually if the operating system does not support automatic resizing. See https://cloud.google.com/compute/docs/disks/add-persistent-disk#resize_pd for details.
+NAME                        ZONE        MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
+go-hardenized-app-instance  us-east1-b  e2-small                   10.142.0.7   35.211.130.133  RUNNING
