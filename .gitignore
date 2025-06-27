@@ -1,0 +1,9 @@
+# Ignorar archivos de entorno
+.env
+
+#
+rare-lambda-*.json
+
+
+
+# Web generate gitconfig
