@@ -16,8 +16,8 @@ COPY handlers/ ./handlers/
 COPY models/ ./models/
 COPY db/ ./db/
 
-COPY cert.pem .
-COPY key.pem .
+COPY cert/ ./cert/
+#COPY cert/key.pem .
 
 # Construye la aplicación Go
 # NOTA: Sin CGO_ENABLED=0, la compilación usará el valor por defecto

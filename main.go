@@ -58,5 +58,5 @@ func main() {
 	log.Printf("Servidor iniciado en http://localhost:%s\n", port)
 	//http.ListenAndServe(":"+port, r)
 
-	log.Fatal(srv.ListenAndServeTLS("cert.pem", "key.pem"))
+	log.Fatal(srv.ListenAndServeTLS("cert/cert.pem", "cert/key.pem"))
 }
