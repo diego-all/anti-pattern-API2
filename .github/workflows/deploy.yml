@@ -184,6 +184,8 @@ jobs:
             --project=${{ env.PROJECT_ID }} \
             --command="
               cd ~/ && \
+              sleep 30 && \ # Espera adicional para que Docker se instale y el PATH se actualice
+              source /etc/profile || source ~/.profile || true && \ # Intenta recargar el perfil
               gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
               sed -i 's|__IMAGE_TAG__|${IMAGE_TAG}|g' docker-compose.prod.yml && \
               docker compose -f docker-compose.prod.yml pull && \
@@ -198,7 +200,7 @@ jobs:
             (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
           echo "Aplicación Go (Bad Practices) desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
 
-  # Nuevo Job para la rama "hardenized"
+  # Job para la rama "hardenized"
   deploy-hardenized:
     if: github.ref == 'refs/heads/feature/hardenized'
     runs-on: ubuntu-latest
@@ -368,6 +370,8 @@ jobs:
             --project=${{ env.PROJECT_ID }} \
             --command="
               cd ~/ && \
+              sleep 30 && \ # Espera adicional para que Docker se instale y el PATH se actualice
+              source /etc/profile || source ~/.profile || true && \ # Intenta recargar el perfil
               gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
               sed -i 's|__IMAGE_TAG__|${IMAGE_TAG}|g' docker-compose.prod.yml && \
               docker compose -f docker-compose.prod.yml pull && \
