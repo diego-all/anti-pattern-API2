@@ -331,7 +331,7 @@ jobs:
       - name: Copy docker-compose.prod.yml and Deploy
         run: |
           IMAGE_TAG="${{ github.sha }}"
-          gcloud compute scp docker-compose.prod.yml cert.pem key.pem ${{ env.GCE_INSTANCE_NAME }}:~/ \
+          gcloud compute scp docker-compose.prod.yml cert/cert.pem cert/key.pem ${{ env.GCE_INSTANCE_NAME }}:~/ \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --recurse
