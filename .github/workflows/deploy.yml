@@ -15,6 +15,7 @@ env:
   DB_IMAGE_NAME: go-instruments-db
   APP_IMAGE_NAME: go-instruments-app
   APP_PORT: 8080 # Puerto de la aplicación internamente
+  GCE_MACHINE_TYPE: e2-micro # Tipo de máquina deseado: Ahora es global y se aplica a ambas instancias
 
 jobs:
   # Job para la rama "bad-practices" (y main)
@@ -22,9 +23,8 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/bad-practices'
     runs-on: ubuntu-latest
     environment: production # Puedes crear un ambiente "bad-practices" si quieres control granular
-    env: # Variables específicas para este job
+    env: # Variables específicas para este job, GCE_MACHINE_TYPE se hereda del env global
       GCE_INSTANCE_NAME: go-vulnerable-app-instance
-      GCE_MACHINE_TYPE: e2-micro # Tipo de máquina deseado: e2-micro
       GCE_STATIC_IP_NAME: go-vulnerable-app-static-ip
 
     steps:
@@ -66,6 +66,27 @@ jobs:
                             --zone=${{ env.GCE_ZONE }} \
                             --project=${{ env.PROJECT_ID }} &> /dev/null; echo $?)
 
+          # Script de inicio para la instancia GCE
+          # Se asegura de que docker-compose esté en el PATH y el usuario tenga permisos
+          STARTUP_SCRIPT="#! /bin/bash
+            # Actualizar e instalar Docker y Docker Compose
+            sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
+
+            # Añadir el usuario actual al grupo docker para evitar usar sudo con docker
+            sudo usermod -aG docker \$(whoami)
+
+            # Dar permisos al socket de Docker (precaución: para entornos de desarrollo/pruebas)
+            sudo chmod 666 /var/run/docker.sock
+
+            # Reiniciar el servicio Docker para aplicar los cambios (opcional, pero puede ayudar)
+            sudo systemctl restart docker
+
+            # Exportar la ruta de docker compose v2 para que sea accesible sin 'docker compose'
+            # y se añada al PATH para futuras sesiones ssh del usuario que ejecuta el startup script
+            echo 'export PATH=\"\$PATH:/usr/local/bin\"' | sudo tee -a /etc/profile
+            echo 'Docker y Docker Compose instalados y configurados.'
+          "
+          
           if [ "$INSTANCE_EXISTS" -ne 0 ]; then
             echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' no existe. Creando nueva instancia con IP estática."
             gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
@@ -79,18 +100,14 @@ jobs:
               --tags=http-server,https-server,ssh-go-app \
               --scopes=https://www.googleapis.com/auth/cloud-platform \
               --address=${{ env.GCE_STATIC_IP_NAME }} \
-              --metadata=startup-script="#! /bin/bash
-                sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
-                sudo usermod -aG docker \$(whoami)
-                sudo chmod 666 /var/run/docker.sock
-                echo 'Docker y Docker Compose instalados.'
-                "
-            sleep 60
+              --metadata-from-file=startup-script=<(echo "$STARTUP_SCRIPT") # Usamos metadata-from-file
+            sleep 90 # Aumentar el tiempo de espera inicial para que el startup-script termine
           else
             CURRENT_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
                           --zone=${{ env.GCE_ZONE }} \
                           --project=${{ env.PROJECT_ID }} \
                           --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+            # Extrae solo el nombre del tipo de máquina (ej. e2-micro)
             CURRENT_MACHINE_TYPE=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
                                     --zone=${{ env.GCE_ZONE }} \
                                     --project=${{ env.PROJECT_ID }} \
@@ -106,8 +123,8 @@ jobs:
             # DEBUG: Muestra el tipo de máquina actual y el tipo de máquina deseado
             echo "DEBUG: Tipo de máquina actual de '${{ env.GCE_INSTANCE_NAME }}': ${CURRENT_MACHINE_TYPE}, Tipo deseado: ${{ env.GCE_MACHINE_TYPE }}"
 
+            # Recrear si la IP no coincide O si el tipo de máquina no coincide
             if [ "$CURRENT_IP" != "$RESERVED_IP" ] || [ "$CURRENT_MACHINE_TYPE" != "${{ env.GCE_MACHINE_TYPE }}" ]; then
-              # Recrear si la IP no coincide O si el tipo de máquina no coincide
               echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' existe pero su IP (${CURRENT_IP} vs ${RESERVED_IP}) o tipo de máquina (${CURRENT_MACHINE_TYPE} vs ${{ env.GCE_MACHINE_TYPE }}) no coinciden. Deteniendo y recreando."
               gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
               sleep 10
@@ -124,13 +141,8 @@ jobs:
                 --tags=http-server,https-server,ssh-go-app \
                 --scopes=https://www.googleapis.com/auth/cloud-platform \
                 --address=${{ env.GCE_STATIC_IP_NAME }} \
-                --metadata=startup-script="#! /bin/bash
-                  sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
-                  sudo usermod -aG docker \$(whoami)
-                  sudo chmod 666 /var/run/docker.sock
-                  echo 'Docker y Docker Compose instalados.'
-                  "
-              sleep 60
+                --metadata-from-file=startup-script=<(echo "$STARTUP_SCRIPT") # Usamos metadata-from-file
+              sleep 90 # Aumentar el tiempo de espera inicial para que el startup-script termine
             else
               echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe, tiene la IP estática asignada y el tipo de máquina correcto. Reiniciando para aplicar cambios."
               gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
@@ -149,7 +161,8 @@ jobs:
 
           while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
             echo "Intento $((ATTEMPTS + 1)) de $MAX_ATTEMPTS: Probando conexión SSH..."
-            if gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --command="echo 'Instancia SSH lista.'" --quiet; then
+            # Agregamos 'exit 0' para asegurar que el comando SSH termina correctamente incluso si 'echo' no produce salida
+            if gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --command="echo 'Instancia SSH lista.' && exit 0" --quiet; then
               echo "Conexión SSH exitosa."
               break
             else
@@ -184,8 +197,13 @@ jobs:
             --project=${{ env.PROJECT_ID }} \
             --command="
               cd ~/ && \
-              sleep 30 && \ # Espera adicional para que Docker se instale y el PATH se actualice
-              source /etc/profile || source ~/.profile || true && \ # Intenta recargar el perfil
+              # Espera para que el startup-script y los cambios de PATH se apliquen completamente
+              # y Docker esté listo para aceptar comandos.
+              sleep 45 && \
+              # Asegura que el PATH incluye /usr/local/bin para docker compose v2
+              export PATH=\"\$PATH:/usr/local/bin\" && \
+              # Intenta recargar el perfil solo si no está en un shell interactivo (para evitar errores)
+              [[ \$- == *i* ]] || source /etc/profile || source ~/.profile || true && \
               gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
               sed -i 's|__IMAGE_TAG__|${IMAGE_TAG}|g' docker-compose.prod.yml && \
               docker compose -f docker-compose.prod.yml pull && \
@@ -196,18 +214,19 @@ jobs:
         run: |
           echo "Esperando que la aplicación Go (Bad Practices) se inicie en https://${{ env.PUBLIC_IP }}:80..."
           sleep 60
-          curl -f -k https://${{ env.PUBLIC_IP }}:80/instruments || \
+          # Usamos --retry para mayor robustez
+          curl -f -k --retry 5 --retry-delay 10 https://${{ env.PUBLIC_IP }}:80/instruments || \
             (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
           echo "Aplicación Go (Bad Practices) desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
+
 
   # Job para la rama "hardenized"
   deploy-hardenized:
     if: github.ref == 'refs/heads/feature/hardenized'
     runs-on: ubuntu-latest
     environment: hardened # Puedes crear un ambiente "hardenized" para distinguir en GitHub
-    env: # Variables específicas para este job
+    env: # Variables específicas para este job, GCE_MACHINE_TYPE se hereda del env global
       GCE_INSTANCE_NAME: go-hardenized-app-instance # Nuevo nombre de instancia
-      GCE_MACHINE_TYPE: e2-micro # Tipo de máquina deseado: e2-micro
       GCE_STATIC_IP_NAME: go-hardenized-app-ip
 
     steps:
@@ -249,6 +268,27 @@ jobs:
                             --zone=${{ env.GCE_ZONE }} \
                             --project=${{ env.PROJECT_ID }} &> /dev/null; echo $?)
 
+          # Script de inicio para la instancia GCE
+          # Se asegura de que docker-compose esté en el PATH y el usuario tenga permisos
+          STARTUP_SCRIPT="#! /bin/bash
+            # Actualizar e instalar Docker y Docker Compose
+            sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
+
+            # Añadir el usuario actual al grupo docker para evitar usar sudo con docker
+            sudo usermod -aG docker \$(whoami)
+
+            # Dar permisos al socket de Docker (precaución: para entornos de desarrollo/pruebas)
+            sudo chmod 666 /var/run/docker.sock
+
+            # Reiniciar el servicio Docker para aplicar los cambios (opcional, pero puede ayudar)
+            sudo systemctl restart docker
+
+            # Exportar la ruta de docker compose v2 para que sea accesible sin 'docker compose'
+            # y se añada al PATH para futuras sesiones ssh del usuario que ejecuta el startup script
+            echo 'export PATH=\"\$PATH:/usr/local/bin\"' | sudo tee -a /etc/profile
+            echo 'Docker y Docker Compose instalados y configurados.'
+          "
+
           if [ "$INSTANCE_EXISTS" -ne 0 ]; then
             echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' no existe. Creando nueva instancia con IP estática."
             gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
@@ -263,18 +303,14 @@ jobs:
               --scopes=https://www.googleapis.com/auth/cloud-platform \
               --address=${{ env.GCE_STATIC_IP_NAME }} \
               --network-tier=STANDARD \
-              --metadata=startup-script="#! /bin/bash
-                sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
-                sudo usermod -aG docker \$(whoami)
-                sudo chmod 666 /var/run/docker.sock
-                echo 'Docker y Docker Compose instalados.'
-                "
-            sleep 60
+              --metadata-from-file=startup-script=<(echo "$STARTUP_SCRIPT") # Usamos metadata-from-file
+            sleep 90 # Aumentar el tiempo de espera inicial para que el startup-script termine
           else
             CURRENT_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
                           --zone=${{ env.GCE_ZONE }} \
                           --project=${{ env.PROJECT_ID }} \
                           --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+            # Extrae solo el nombre del tipo de máquina (ej. e2-micro)
             CURRENT_MACHINE_TYPE=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
                                     --zone=${{ env.GCE_ZONE }} \
                                     --project=${{ env.PROJECT_ID }} \
@@ -310,13 +346,8 @@ jobs:
                 --scopes=https://www.googleapis.com/auth/cloud-platform \
                 --address=${{ env.GCE_STATIC_IP_NAME }} \
                 --network-tier=STANDARD \
-                --metadata=startup-script="#! /bin/bash
-                  sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
-                  sudo usermod -aG docker \$(whoami)
-                  sudo chmod 666 /var/run/docker.sock
-                  echo 'Docker y Docker Compose instalados.'
-                  "
-              sleep 60
+                --metadata-from-file=startup-script=<(echo "$STARTUP_SCRIPT") # Usamos metadata-from-file
+              sleep 90 # Aumentar el tiempo de espera inicial para que el startup-script termine
             else
               echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe, tiene la IP estática asignada y el tipo de máquina correcto. Reiniciando para aplicar cambios."
               gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
@@ -335,7 +366,8 @@ jobs:
 
           while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
             echo "Intento $((ATTEMPTS + 1)) de $MAX_ATTEMPTS: Probando conexión SSH..."
-            if gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --command="echo 'Instancia SSH lista.'" --quiet; then
+            # Agregamos 'exit 0' para asegurar que el comando SSH termina correctamente incluso si 'echo' no produce salida
+            if gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --command="echo 'Instancia SSH lista.' && exit 0" --quiet; then
               echo "Conexión SSH exitosa."
               break
             else
@@ -370,8 +402,13 @@ jobs:
             --project=${{ env.PROJECT_ID }} \
             --command="
               cd ~/ && \
-              sleep 30 && \ # Espera adicional para que Docker se instale y el PATH se actualice
-              source /etc/profile || source ~/.profile || true && \ # Intenta recargar el perfil
+              # Espera para que el startup-script y los cambios de PATH se apliquen completamente
+              # y Docker esté listo para aceptar comandos.
+              sleep 45 && \
+              # Asegura que el PATH incluye /usr/local/bin para docker compose v2
+              export PATH=\"\$PATH:/usr/local/bin\" && \
+              # Intenta recargar el perfil solo si no está en un shell interactivo (para evitar errores)
+              [[ \$- == *i* ]] || source /etc/profile || source ~/.profile || true && \
               gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
               sed -i 's|__IMAGE_TAG__|${IMAGE_TAG}|g' docker-compose.prod.yml && \
               docker compose -f docker-compose.prod.yml pull && \
@@ -382,6 +419,7 @@ jobs:
         run: |
           echo "Esperando que la aplicación Go (Hardenized) se inicie en https://${{ env.PUBLIC_IP }}:80..."
           sleep 60
-          curl -f -k https://${{ env.PUBLIC_IP }}:80/instruments || \
+          # Usamos --retry para mayor robustez
+          curl -f -k --retry 5 --retry-delay 10 https://${{ env.PUBLIC_IP }}:80/instruments || \
             (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
           echo "Aplicación Go (Hardenized) desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
