@@ -10,21 +10,21 @@ on:
 env:
   PROJECT_ID: rare-lambda-415802
   GCE_ZONE: us-east1-b # La zona puede ser la misma para ambas instancias
-  GCE_REGION: us-east1 # <--- AGREGADO: Define la región para operaciones de IP estática
+  GCE_REGION: us-east1 # Define la región para operaciones de IP estática
   GCR_HOSTNAME: gcr.io
   DB_IMAGE_NAME: go-instruments-db
   APP_IMAGE_NAME: go-instruments-app
   APP_PORT: 8080 # Puerto de la aplicación internamente
 
 jobs:
-  # Job para la rama "bad-practices" (y main) - usando e2-medium
+  # Job para la rama "bad-practices" (y main)
   deploy-bad-practices:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/bad-practices'
     runs-on: ubuntu-latest
     environment: production # Puedes crear un ambiente "bad-practices" si quieres control granular
-    env: # Variables específicas para este job (se heredan las globales, pero estas pueden sobrescribirlas)
+    env: # Variables específicas para este job
       GCE_INSTANCE_NAME: go-vulnerable-app-instance
-      GCE_MACHINE_TYPE: e2-micro # Tipo de máquina para el ambiente vulnerable
+      GCE_MACHINE_TYPE: e2-micro # Tipo de máquina deseado: e2-micro
       GCE_STATIC_IP_NAME: go-vulnerable-app-static-ip
 
     steps:
@@ -59,6 +59,9 @@ jobs:
       - name: Create or update GCE instance for Bad Practices
         id: create-gce-bad-practices
         run: |
+          # DEBUG: Muestra el tipo de máquina deseado
+          echo "DEBUG: Tipo de máquina deseado para '${{ env.GCE_INSTANCE_NAME }}': ${{ env.GCE_MACHINE_TYPE }}"
+
           INSTANCE_EXISTS=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
                             --zone=${{ env.GCE_ZONE }} \
                             --project=${{ env.PROJECT_ID }} &> /dev/null; echo $?)
@@ -88,14 +91,24 @@ jobs:
                           --zone=${{ env.GCE_ZONE }} \
                           --project=${{ env.PROJECT_ID }} \
                           --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
-            # CORRECCIÓN: Usar GCE_REGION en lugar de GCE_ZONE para describir la dirección estática
+            CURRENT_MACHINE_TYPE=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
+                                    --zone=${{ env.GCE_ZONE }} \
+                                    --project=${{ env.PROJECT_ID }} \
+                                    --format='get(machineType)' | awk -F/ '{print $NF}')
+
             RESERVED_IP=$(gcloud compute addresses describe ${{ env.GCE_STATIC_IP_NAME }} \
                            --region=${{ env.GCE_REGION }} \
                            --project=${{ env.PROJECT_ID }} \
                            --format='value(address)')
 
-            if [ "$CURRENT_IP" != "$RESERVED_IP" ]; then
-              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' existe pero su IP no es la estática esperada. Deteniendo y recreando para asignar la IP estática."
+            # DEBUG: Muestra la IP actual y la IP reservada
+            echo "DEBUG: IP actual de '${{ env.GCE_INSTANCE_NAME }}': ${CURRENT_IP}, IP reservada: ${RESERVED_IP}"
+            # DEBUG: Muestra el tipo de máquina actual y el tipo de máquina deseado
+            echo "DEBUG: Tipo de máquina actual de '${{ env.GCE_INSTANCE_NAME }}': ${CURRENT_MACHINE_TYPE}, Tipo deseado: ${{ env.GCE_MACHINE_TYPE }}"
+
+            if [ "$CURRENT_IP" != "$RESERVED_IP" ] || [ "$CURRENT_MACHINE_TYPE" != "${{ env.GCE_MACHINE_TYPE }}" ]; then
+              # Recrear si la IP no coincide O si el tipo de máquina no coincide
+              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' existe pero su IP (${CURRENT_IP} vs ${RESERVED_IP}) o tipo de máquina (${CURRENT_MACHINE_TYPE} vs ${{ env.GCE_MACHINE_TYPE }}) no coinciden. Deteniendo y recreando."
               gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
               sleep 10
               gcloud compute instances delete ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
@@ -119,7 +132,7 @@ jobs:
                   "
               sleep 60
             else
-              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe y tiene la IP estática asignada. Reiniciando para aplicar cambios."
+              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe, tiene la IP estática asignada y el tipo de máquina correcto. Reiniciando para aplicar cambios."
               gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
               sleep 10
               gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
@@ -185,14 +198,14 @@ jobs:
             (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
           echo "Aplicación Go (Bad Practices) desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
 
-  # Nuevo Job para la rama "hardenized" - usando e2-small
+  # Nuevo Job para la rama "hardenized"
   deploy-hardenized:
     if: github.ref == 'refs/heads/feature/hardenized'
     runs-on: ubuntu-latest
     environment: hardened # Puedes crear un ambiente "hardenized" para distinguir en GitHub
     env: # Variables específicas para este job
       GCE_INSTANCE_NAME: go-hardenized-app-instance # Nuevo nombre de instancia
-      GCE_MACHINE_TYPE: e2-micro # Tipo de máquina más económico
+      GCE_MACHINE_TYPE: e2-micro # Tipo de máquina deseado: e2-micro
       GCE_STATIC_IP_NAME: go-hardenized-app-ip
 
     steps:
@@ -227,6 +240,9 @@ jobs:
       - name: Create or update GCE instance for Hardenized
         id: create-gce-hardenized
         run: |
+          # DEBUG: Muestra el tipo de máquina deseado
+          echo "DEBUG: Tipo de máquina deseado para '${{ env.GCE_INSTANCE_NAME }}': ${{ env.GCE_MACHINE_TYPE }}"
+
           INSTANCE_EXISTS=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
                             --zone=${{ env.GCE_ZONE }} \
                             --project=${{ env.PROJECT_ID }} &> /dev/null; echo $?)
@@ -257,14 +273,25 @@ jobs:
                           --zone=${{ env.GCE_ZONE }} \
                           --project=${{ env.PROJECT_ID }} \
                           --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
-            # CORRECCIÓN: Usar GCE_REGION en lugar de GCE_ZONE para describir la dirección estática
+            CURRENT_MACHINE_TYPE=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
+                                    --zone=${{ env.GCE_ZONE }} \
+                                    --project=${{ env.PROJECT_ID }} \
+                                    --format='get(machineType)' | awk -F/ '{print $NF}')
+
             RESERVED_IP=$(gcloud compute addresses describe ${{ env.GCE_STATIC_IP_NAME }} \
                            --region=${{ env.GCE_REGION }} \
                            --project=${{ env.PROJECT_ID }} \
                            --format='value(address)')
 
-            if [ "$CURRENT_IP" != "$RESERVED_IP" ]; then
-              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' existe pero su IP no es la estática esperada. Deteniendo y recreando para asignar la IP estática."
+            # DEBUG: Muestra la IP actual y la IP reservada
+            echo "DEBUG: IP actual de '${{ env.GCE_INSTANCE_NAME }}': ${CURRENT_IP}, IP reservada: ${RESERVED_IP}"
+            # DEBUG: Muestra el tipo de máquina actual y el tipo de máquina deseado
+            echo "DEBUG: Tipo de máquina actual de '${{ env.GCE_INSTANCE_NAME }}': ${CURRENT_MACHINE_TYPE}, Tipo deseado: ${{ env.GCE_MACHINE_TYPE }}"
+
+
+            if [ "$CURRENT_IP" != "$RESERVED_IP" ] || [ "$CURRENT_MACHINE_TYPE" != "${{ env.GCE_MACHINE_TYPE }}" ]; then
+              # Recrear si la IP no coincide O si el tipo de máquina no coincide
+              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' existe pero su IP (${CURRENT_IP} vs ${RESERVED_IP}) o tipo de máquina (${CURRENT_MACHINE_TYPE} vs ${{ env.GCE_MACHINE_TYPE }}) no coinciden. Deteniendo y recreando."
               gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
               sleep 10
               gcloud compute instances delete ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
@@ -289,7 +316,7 @@ jobs:
                   "
               sleep 60
             else
-              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe y tiene la IP estática asignada. Reiniciando para aplicar cambios."
+              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe, tiene la IP estática asignada y el tipo de máquina correcto. Reiniciando para aplicar cambios."
               gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
               sleep 10
               gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
