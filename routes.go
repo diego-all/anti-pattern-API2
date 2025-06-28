@@ -39,6 +39,11 @@ func AppRoutes() http.Handler {
 		MaxAge:           300, // Duración de caché para pre-vuelos CORS en segundos
 	}))
 
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK) // Establece el código de estado HTTP 200 OK
+		w.Write([]byte("OK"))        // Escribe "OK" en el cuerpo de la respuesta
+	})
+
 	// Agrupa las rutas relacionadas con "/instruments"
 	r.Route("/instruments", func(r chi.Router) {
 
