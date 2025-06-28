@@ -27,6 +27,7 @@ jobs:
       GCE_INSTANCE_NAME: go-vulnerable-app-instance
       GCE_STATIC_IP_NAME: go-vulnerable-app-static-ip
       IMAGE_TAG: ${{ github.sha }} # Usamos github.sha como tag para las imágenes
+      SSH_USER: daposadalpractices # Definir SSH_USER como variable de entorno del job
 
     steps:
       - name: Checkout del código
@@ -119,13 +120,9 @@ jobs:
           MAX_ATTEMPTS=15
           SLEEP_TIME=20 # Segundos entre reintentos
 
-          # Puedes cambiar 'runner' por 'daposadalpractices' si ese es el usuario SSH principal de tu VM
-          # o por 'ubuntu' si tu imagen base de Ubuntu lo usa por defecto.
-          SSH_USER="daposadalpractices" 
-
           while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
             echo "Intento $((ATTEMPTS + 1)) de $MAX_ATTEMPTS: Probando conexión SSH..."
-            if gcloud compute ssh ${{ SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
+            if gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
                 --zone=${{ env.GCE_ZONE }} \
                 --project=${{ env.PROJECT_ID }} \
                 --command="echo 'Instancia SSH lista.'" \
@@ -137,7 +134,7 @@ jobs:
             else
               echo "Fallo al conectar SSH. Reintentando en ${SLEEP_TIME} segundos..."
               ATTEMPTS=$((ATTEMPTS + 1))
-              sleep $SLEP_TIME
+              sleep $SLEEP_TIME
             fi
           done
 
@@ -148,9 +145,7 @@ jobs:
 
       - name: Instalar Docker y Docker Compose en la instancia (si no está instalado)
         run: |
-          # Asegúrate que SSH_USER sea el usuario correcto en tu VM
-          SSH_USER="daposadalpractices" 
-          gcloud compute ssh ${{ SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
+          gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --ssh-flag="-o StrictHostKeyChecking=no" \
@@ -183,20 +178,18 @@ jobs:
 
       - name: Copiar docker-compose.prod.yml y certificados a la instancia
         run: |
-          SSH_USER="daposadalpractices" # Asegúrate que SSH_USER sea el usuario correcto en tu VM
           gcloud compute scp --zone=${{ env.GCE_ZONE }} \
                               --project=${{ env.PROJECT_ID }} \
                               --recurse \
                               --ssh-flag="-o StrictHostKeyChecking=no" \
                               --ssh-flag="-o UserKnownHostsFile=/dev/null" \
                               docker-compose.prod.yml cert/ \
-                              ${{ SSH_USER }}@${{ env.GCE_INSTANCE_NAME }}:~/
+                              ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }}:~/
           echo "Archivos copiados a la instancia."
 
       - name: Actualizar docker-compose.prod.yml y desplegar en la instancia
         run: |
-          SSH_USER="daposadalpractices" # Asegúrate que SSH_USER sea el usuario correcto en tu VM
-          gcloud compute ssh ${{ SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
+          gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --ssh-flag="-o StrictHostKeyChecking=no" \
@@ -221,6 +214,7 @@ jobs:
       GCE_INSTANCE_NAME: go-hardenized-app-instance
       GCE_STATIC_IP_NAME: go-hardenized-app-ip
       IMAGE_TAG: ${{ github.sha }} # Usamos github.sha como tag
+      SSH_USER: daposadalpractices # Definir SSH_USER como variable de entorno del job
 
     steps:
       - name: Checkout del código
@@ -313,11 +307,9 @@ jobs:
           MAX_ATTEMPTS=15
           SLEEP_TIME=20 # Segundos entre reintentos
 
-          SSH_USER="daposadalpractices" # Puedes cambiar 'runner' por 'daposadalpractices'
-
           while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
             echo "Intento $((ATTEMPTS + 1)) de $MAX_ATTEMPTS: Probando conexión SSH..."
-            if gcloud compute ssh ${{ SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
+            if gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
                 --zone=${{ env.GCE_ZONE }} \
                 --project=${{ env.PROJECT_ID }} \
                 --command="echo 'Instancia SSH lista.'" \
@@ -340,8 +332,7 @@ jobs:
 
       - name: Instalar Docker y Docker Compose en la instancia (si no está instalado)
         run: |
-          SSH_USER="daposadalpractices" # Asegúrate que SSH_USER sea el usuario correcto en tu VM
-          gcloud compute ssh ${{ SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
+          gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --ssh-flag="-o StrictHostKeyChecking=no" \
@@ -372,20 +363,18 @@ jobs:
 
       - name: Copiar docker-compose.prod.yml y certificados a la instancia
         run: |
-          SSH_USER="daposadalpractices" # Asegúrate que SSH_USER sea el usuario correcto en tu VM
           gcloud compute scp --zone=${{ env.GCE_ZONE }} \
                               --project=${{ env.PROJECT_ID }} \
                               --recurse \
                               --ssh-flag="-o StrictHostKeyChecking=no" \
                               --ssh-flag="-o UserKnownHostsFile=/dev/null" \
                               docker-compose.prod.yml cert/ \
-                              ${{ SSH_USER }}@${{ env.GCE_INSTANCE_NAME }}:~/
+                              ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }}:~/
           echo "Archivos copiados a la instancia."
 
       - name: Actualizar docker-compose.prod.yml y desplegar en la instancia
         run: |
-          SSH_USER="daposadalpractices" # Asegúrate que SSH_USER sea el usuario correcto en tu VM
-          gcloud compute ssh ${{ SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
+          gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
             --ssh-flag="-o StrictHostKeyChecking=no" \
