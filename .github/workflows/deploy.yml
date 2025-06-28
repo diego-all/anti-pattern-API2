@@ -178,13 +178,14 @@ jobs:
 
       - name: Copiar docker-compose.prod.yml y certificados a la instancia
         run: |
-          gcloud compute scp --zone=${{ env.GCE_ZONE }} \
+          # Se eliminan los flags SSH explícitos para gcloud compute scp,
+          # ya que gcloud compute config-ssh debería manejar la configuración SSH.
+          # También se eliminó la duplicación del comando.
+          gcloud compute scp docker-compose.prod.yml cert/ \
+                              ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }}:~/ \
+                              --zone=${{ env.GCE_ZONE }} \
                               --project=${{ env.PROJECT_ID }} \
-                              --recurse \
-                              --ssh-flag="-o StrictHostKeyChecking=no" \
-                              --ssh-flag="-o UserKnownHostsFile=/dev/null" \
-                              docker-compose.prod.yml cert/ \
-                              ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }}:~/
+                              --recurse
           echo "Archivos copiados a la instancia."
 
       - name: Actualizar docker-compose.prod.yml y desplegar en la instancia
@@ -363,13 +364,13 @@ jobs:
 
       - name: Copiar docker-compose.prod.yml y certificados a la instancia
         run: |
-          gcloud compute scp --zone=${{ env.GCE_ZONE }} \
+          # Se eliminan los flags SSH explícitos para gcloud compute scp,
+          # ya que gcloud compute config-ssh debería manejar la configuración SSH.
+          gcloud compute scp docker-compose.prod.yml cert/ \
+                              ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }}:~/ \
+                              --zone=${{ env.GCE_ZONE }} \
                               --project=${{ env.PROJECT_ID }} \
-                              --recurse \
-                              --ssh-flag="-o StrictHostKeyChecking=no" \
-                              --ssh-flag="-o UserKnownHostsFile=/dev/null" \
-                              docker-compose.prod.yml cert/ \
-                              ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }}:~/
+                              --recurse
           echo "Archivos copiados a la instancia."
 
       - name: Actualizar docker-compose.prod.yml y desplegar en la instancia
