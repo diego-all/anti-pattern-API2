@@ -76,7 +76,8 @@ jobs:
                   --boot-disk-type=pd-standard \
                   --tags=http-server,https-server,ssh-go-app \
                   --scopes=https://www.googleapis.com/auth/cloud-platform \
-                  --address=${{ env.GCE_STATIC_IP_NAME }}
+                  --address=${{ env.GCE_STATIC_IP_NAME }} \
+                  --network-tier=STANDARD
               echo "Instancia creada. Esperando a que esté lista para SSH..."
               sleep 60 # Dar tiempo para que la instancia inicie y SSH esté disponible
           else
@@ -126,8 +127,7 @@ jobs:
                 echo "Docker Compose (plugin) instalado."
             else
                 echo "Docker Compose ya está instalado."
-            fi
-
+            CFI
       - name: Copiar docker-compose.prod.yml y certificados a la instancia
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -218,7 +218,8 @@ jobs:
                   --boot-disk-type=pd-standard \
                   --tags=http-server,https-server,ssh-go-app \
                   --scopes=https://www.googleapis.com/auth/cloud-platform \
-                  --address=${{ env.GCE_STATIC_IP_NAME }}
+                  --address=${{ env.GCE_STATIC_IP_NAME }} \
+                  --network-tier=STANDARD
               echo "Instancia creada. Esperando a que esté lista para SSH..."
               sleep 60 # Dar tiempo para que la instancia inicie y SSH esté disponible
           else
