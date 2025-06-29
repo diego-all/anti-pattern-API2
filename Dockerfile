@@ -11,12 +11,11 @@ RUN go mod download
 
 # Copia todo el código fuente de la aplicación
 COPY main.go .
+COPY routes.go .
 COPY handlers/ ./handlers/
 COPY models/ ./models/
 COPY db/ ./db/
-
-COPY cert.pem .
-COPY key.pem .
+COPY cert/ ./cert/
 
 # Construye la aplicación Go
 # NOTA: Sin CGO_ENABLED=0, la compilación usará el valor por defecto
