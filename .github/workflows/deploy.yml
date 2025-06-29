@@ -1,97 +1,134 @@
-name: Deploy Go App to GCE and Prepare for DAST
+name: Despliegue Continuo a GCE
 
 on:
   push:
     branches:
-      - main
       - feature/bad-practices
-      - feature/hardenized # Agregamos la nueva rama de despliegue
+      - feature/hardenized
 
 env:
   PROJECT_ID: rare-lambda-415802
-  GCE_ZONE: us-east1-b # La zona puede ser la misma para ambas instancias
+  GCE_ZONE: us-east1-b
+  GCE_REGION: us-east1 # Región para las IPs estáticas
   GCR_HOSTNAME: gcr.io
   DB_IMAGE_NAME: go-instruments-db
   APP_IMAGE_NAME: go-instruments-app
   APP_PORT: 8080 # Puerto de la aplicación internamente
+  GCE_MACHINE_TYPE: e2-micro
+  # Las IPs estáticas se definirán por job
 
 jobs:
-  # Job para la rama "bad-practices" (y main) - usando e2-medium
   deploy-bad-practices:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/bad-practices'
+    name: Desplegar a Instancia de Bad Practices
+    if: github.ref == 'refs/heads/feature/bad-practices'
     runs-on: ubuntu-latest
-    environment: production # Puedes crear un ambiente "bad-practices" si quieres control granular
-    env: # Variables específicas para este job
+    environment: bad-practices # Opcional: para entornos de despliegue
+    env:
       GCE_INSTANCE_NAME: go-vulnerable-app-instance
-      GCE_MACHINE_TYPE: e2-micro # Tipo de máquina para el ambiente vulnerable
+      GCE_STATIC_IP_NAME: go-vulnerable-app-static-ip
+      IMAGE_TAG: ${{ github.sha }} # Usamos github.sha como tag para las imágenes
+      SSH_USER: daposadalpractices # Definir SSH_USER como variable de entorno del job
 
     steps:
-      - name: Checkout repository
+      - name: Checkout del código
         uses: actions/checkout@v4
 
-      - name: Authenticate Google Cloud Service Account
+      - name: Autenticar a Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          credentials_json: '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}'
 
-      - name: Set up Google Cloud SDK
+      - name: Configurar Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      - name: Authorize Docker to GCR
+      - name: Configurar Docker para GCR
         run: gcloud auth configure-docker ${{ env.GCR_HOSTNAME }}
 
-      - name: Build and push DB Docker image
+      - name: Construir y etiquetar imagen de la base de datos
         run: |
-          IMAGE_TAG="${{ github.sha }}"
-          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:"${IMAGE_TAG}" -f db/Dockerfile db/
-          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:"${IMAGE_TAG}"
+          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:${{ env.IMAGE_TAG }} -f db/Dockerfile ./db
+          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-      - name: Build and push App Docker image
+      - name: Construir y etiquetar imagen de la aplicación
         run: |
-          IMAGE_TAG="${{ github.sha }}"
-          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:"${IMAGE_TAG}" .
-          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:"${IMAGE_TAG}"
+          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:${{ env.IMAGE_TAG }} -f Dockerfile .
+          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-      - name: Create or update GCE instance for Bad Practices
-        id: create-gce-bad-practices
+      - name: Obtener dirección IP reservada y verificar/crear instancia de GCE
         run: |
-          if gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null; then
-            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe. Deteniendo y reiniciando para aplicar cambios."
-            gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
-            sleep 10
-            gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
-          else
-            echo "Creando nueva instancia '${{ env.GCE_INSTANCE_NAME }}'."
+          RESERVED_IP=$(gcloud compute addresses describe ${{ env.GCE_STATIC_IP_NAME }} \
+                           --region=${{ env.GCE_REGION }} \
+                           --project=${{ env.PROJECT_ID }} \
+                           --format='value(address)')
+          echo "RESERVED_IP=${RESERVED_IP}" >> $GITHUB_ENV
+          echo "La IP de la instancia ${{ env.GCE_INSTANCE_NAME }} es: $RESERVED_IP"
+
+          INSTANCE_EXISTS=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
+                            --zone=${{ env.GCE_ZONE }} \
+                            --project=${{ env.PROJECT_ID }} &> /dev/null; echo $?)
+
+          if [ "$INSTANCE_EXISTS" -ne 0 ]; then
+            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' no existe. Creando nueva instancia con IP estática."
             gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
-              --project=${{ env.PROJECT_ID }} \
-              --zone=${{ env.GCE_ZONE }} \
-              --machine-type=${{ env.GCE_MACHINE_TYPE }} \
-              --image-family=ubuntu-2204-lts \
-              --image-project=ubuntu-os-cloud \
-              --boot-disk-size=20GB \
-              --boot-disk-type=pd-standard \
-              --tags=http-server,https-server,ssh-go-app \
-              --scopes=https://www.googleapis.com/auth/cloud-platform \
-              --metadata=startup-script="#! /bin/bash
-                sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
-                sudo usermod -aG docker \$(whoami)
-                sudo chmod 666 /var/run/docker.sock
-                echo 'Docker y Docker Compose instalados.'
-                "
-            sleep 60
+                --project=${{ env.PROJECT_ID }} \
+                --zone=${{ env.GCE_ZONE }} \
+                --machine-type=${{ env.GCE_MACHINE_TYPE }} \
+                --image-family=ubuntu-2204-lts \
+                --image-project=ubuntu-os-cloud \
+                --boot-disk-size=20GB \
+                --boot-disk-type=pd-standard \
+                --tags=http-server,https-server,ssh-go-app \
+                --scopes=https://www.googleapis.com/auth/cloud-platform \
+                --address=${{ env.GCE_STATIC_IP_NAME }} \
+                --network-tier=STANDARD
+            echo "Instancia creada. Esperando a que esté lista para SSH..."
+            sleep 30 # Tiempo inicial para que la instancia arranque
+          else
+            CURRENT_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
+                          --zone=${{ env.GCE_ZONE }} \
+                          --project=${{ env.PROJECT_ID }} \
+                          --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+            if [ "$CURRENT_IP" != "$RESERVED_IP" ]; then
+              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' existe pero su IP no es la estática esperada. Recreando."
+              gcloud compute instances delete ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
+              sleep 10
+              gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
+                --project=${{ env.PROJECT_ID }} \
+                --zone=${{ env.GCE_ZONE }} \
+                --machine-type=${{ env.GCE_MACHINE_TYPE }} \
+                --image-family=ubuntu-2204-lts \
+                --image-project=ubuntu-os-cloud \
+                --boot-disk-size=20GB \
+                --boot-disk-type=pd-standard \
+                --tags=http-server,https-server,ssh-go-app \
+                --scopes=https://www.googleapis.com/auth/cloud-platform \
+                --address=${{ env.GCE_STATIC_IP_NAME }} \
+                --network-tier=STANDARD
+              sleep 30 # Tiempo inicial para que la instancia arranque
+            else
+              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe y tiene la IP estática asignada."
+            fi
           fi
-          echo "Esperando que la instancia GCE '${{ env.GCE_INSTANCE_NAME }}' esté lista para SSH..."
+          
+          echo "Configurando SSH para gcloud..."
           gcloud compute config-ssh --quiet --project=${{ env.PROJECT_ID }}
 
+          echo "Esperando que la instancia GCE '${{ env.GCE_INSTANCE_NAME }}' esté lista para SSH..."
           ATTEMPTS=0
           MAX_ATTEMPTS=15
-          SLEEP_TIME=20
+          SLEEP_TIME=20 # Segundos entre reintentos
 
           while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
             echo "Intento $((ATTEMPTS + 1)) de $MAX_ATTEMPTS: Probando conexión SSH..."
-            if gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --command="echo 'Instancia SSH lista.'" --quiet; then
+            if gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
+                --zone=${{ env.GCE_ZONE }} \
+                --project=${{ env.PROJECT_ID }} \
+                --command="echo 'Instancia SSH lista.'" \
+                --quiet \
+                --ssh-flag="-o StrictHostKeyChecking=no" \
+                --ssh-flag="-o UserKnownHostsFile=/dev/null"; then
               echo "Conexión SSH exitosa."
               break
             else
@@ -106,118 +143,180 @@ jobs:
             exit 1
           fi
 
-          PUBLIC_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
-            --zone=${{ env.GCE_ZONE }} \
-            --project=${{ env.PROJECT_ID }} \
-            --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
-          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
-          echo "::notice file=README.md::IP pública de la aplicación Bad Practices: $PUBLIC_IP"
-
-      - name: Copy docker-compose.prod.yml and Deploy
+      - name: Instalar Docker y Docker Compose en la instancia (si no está instalado)
         run: |
-          IMAGE_TAG="${{ github.sha }}"
-          gcloud compute scp docker-compose.prod.yml cert.pem key.pem ${{ env.GCE_INSTANCE_NAME }}:~/ \
+          gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
-            --recurse
-
-          gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} \
-            --zone=${{ env.GCE_ZONE }} \
-            --project=${{ env.PROJECT_ID }} \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            --ssh-flag="-o UserKnownHostsFile=/dev/null" \
             --command="
-              cd ~/ && \
-              gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
-              sed -i 's|__IMAGE_TAG__|${IMAGE_TAG}|g' docker-compose.prod.yml && \
-              docker compose -f docker-compose.prod.yml pull && \
-              docker compose -f docker-compose.prod.yml up -d
+              echo 'Verificando e instalando Docker y Docker Compose si es necesario...'
+              if ! command -v docker &> /dev/null; then
+                  echo 'Instalando Docker...'
+                  sudo apt-get update
+                  sudo apt-get install -y ca-certificates curl gnupg lsb-release
+                  sudo mkdir -p /etc/apt/keyrings
+                  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                  echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+                  sudo apt-get update
+                  sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+                  echo 'Docker instalado.'
+              else
+                  echo 'Docker ya está instalado.'
+              fi
+              # Docker Compose v2 (plugin) se instala con docker-compose-plugin
+              if ! command -v docker compose &> /dev/null; then
+                  echo 'Docker Compose (plugin) no encontrado, verificando instalación de docker-compose-plugin.'
+                  sudo apt-get install -y docker-compose-plugin # Asegurarse de que esté instalado
+              fi
+              # Asegurarse de que el usuario pueda ejecutar comandos docker sin sudo
+              sudo usermod -aG docker \$(whoami) || true
+              newgrp docker || true # Para aplicar cambios de grupo inmediatamente en la misma sesión SSH
+              echo 'Instalación de Docker/Docker Compose completada.'
             "
 
-      - name: Verify application deployment (Bad Practices)
+      - name: Copiar docker-compose.prod.yml y certificados a la instancia
         run: |
-          echo "Esperando que la aplicación Go (Bad Practices) se inicie en https://${{ env.PUBLIC_IP }}:80..."
-          sleep 60
-          curl -f -k https://${{ env.PUBLIC_IP }}:80/instruments || \
-            (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
-          echo "Aplicación Go (Bad Practices) desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
+          # Se eliminan los flags SSH explícitos para gcloud compute scp,
+          # ya que gcloud compute config-ssh debería manejar la configuración SSH.
+          # También se eliminó la duplicación del comando.
+          gcloud compute scp docker-compose.prod.yml cert/ \
+                              ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }}:~/ \
+                              --zone=${{ env.GCE_ZONE }} \
+                              --project=${{ env.PROJECT_ID }} \
+                              --recurse
+          echo "Archivos copiados a la instancia."
 
-  # Nuevo Job para la rama "hardenized" - usando e2-small
+      - name: Actualizar docker-compose.prod.yml y desplegar en la instancia
+        run: |
+          gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
+            --zone=${{ env.GCE_ZONE }} \
+            --project=${{ env.PROJECT_ID }} \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            --ssh-flag="-o UserKnownHostsFile=/dev/null" \
+            --command="
+              cd ~/ && \
+              sed -i \"s|__IMAGE_TAG__|${{ env.IMAGE_TAG }}|g\" docker-compose.prod.yml && \
+              gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
+              echo 'Desplegando la aplicación con docker compose...'
+              docker compose -f docker-compose.prod.yml down -v --rmi all || true && \
+              docker compose -f docker-compose.prod.yml pull && \
+              docker compose -f docker-compose.prod.yml up -d
+              echo 'Despliegue completado.'
+            "
+
   deploy-hardenized:
+    name: Desplegar a Instancia Hardenized
     if: github.ref == 'refs/heads/feature/hardenized'
     runs-on: ubuntu-latest
-    environment: hardened # Puedes crear un ambiente "hardenized" para distinguir en GitHub
-    env: # Variables específicas para este job
-      GCE_INSTANCE_NAME: go-hardenized-app-instance # Nuevo nombre de instancia
-      GCE_MACHINE_TYPE: e2-micro # Tipo de máquina más económico
+    environment: hardenized # Opcional: para entornos de despliegue
+    env:
+      GCE_INSTANCE_NAME: go-hardenized-app-instance
+      GCE_STATIC_IP_NAME: go-hardenized-app-ip
+      IMAGE_TAG: ${{ github.sha }} # Usamos github.sha como tag
+      SSH_USER: daposadalpractices # Definir SSH_USER como variable de entorno del job
 
     steps:
-      - name: Checkout repository
+      - name: Checkout del código
         uses: actions/checkout@v4
 
-      - name: Authenticate Google Cloud Service Account
+      - name: Autenticar a Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          credentials_json: '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}'
 
-      - name: Set up Google Cloud SDK
+      - name: Configurar Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      - name: Authorize Docker to GCR
+      - name: Configurar Docker para GCR
         run: gcloud auth configure-docker ${{ env.GCR_HOSTNAME }}
 
-      - name: Build and push DB Docker image
+      - name: Construir y etiquetar imagen de la base de datos
         run: |
-          IMAGE_TAG="${{ github.sha }}"
-          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:"${IMAGE_TAG}" -f db/Dockerfile db/
-          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:"${IMAGE_TAG}"
+          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:${{ env.IMAGE_TAG }} -f db/Dockerfile ./db
+          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.DB_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-      - name: Build and push App Docker image
+      - name: Construir y etiquetar imagen de la aplicación
         run: |
-          IMAGE_TAG="${{ github.sha }}"
-          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:"${IMAGE_TAG}" .
-          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:"${IMAGE_TAG}"
+          docker build -t ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:${{ env.IMAGE_TAG }} -f Dockerfile .
+          docker push ${{ env.GCR_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.APP_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-      - name: Create or update GCE instance for Hardenized
-        id: create-gce-hardenized
+      - name: Obtener dirección IP reservada y verificar/crear instancia de GCE
         run: |
-          if gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} &> /dev/null; then
-            echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe. Deteniendo y reiniciando para aplicar cambios."
-            gcloud compute instances stop ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet || true
-            sleep 10
-            gcloud compute instances start ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
+          RESERVED_IP=$(gcloud compute addresses describe ${{ env.GCE_STATIC_IP_NAME }} \
+                           --region=${{ env.GCE_REGION }} \
+                           --project=${{ env.PROJECT_ID }} \
+                           --format='value(address)')
+          echo "RESERVED_IP=${RESERVED_IP}" >> $GITHUB_ENV
+          echo "La IP de la instancia ${{ env.GCE_INSTANCE_NAME }} es: $RESERVED_IP"
+
+          INSTANCE_EXISTS=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
+                            --zone=${{ env.GCE_ZONE }} \
+                            --project=${{ env.PROJECT_ID }} &> /dev/null; echo $?)
+
+          if [ "$INSTANCE_EXISTS" -ne 0 ]; then
+              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' no existe. Creando nueva instancia con IP estática."
+              gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
+                  --project=${{ env.PROJECT_ID }} \
+                  --zone=${{ env.GCE_ZONE }} \
+                  --machine-type=${{ env.GCE_MACHINE_TYPE }} \
+                  --image-family=ubuntu-2204-lts \
+                  --image-project=ubuntu-os-cloud \
+                  --boot-disk-size=20GB \
+                  --boot-disk-type=pd-standard \
+                  --tags=http-server,https-server,ssh-go-app \
+                  --scopes=https://www.googleapis.com/auth/cloud-platform \
+                  --address=${{ env.GCE_STATIC_IP_NAME }} \
+                  --network-tier=STANDARD
+              echo "Instancia creada. Esperando a que esté lista para SSH..."
+              sleep 30 # Dar tiempo para que la instancia inicie y SSH esté disponible
           else
-            echo "Creando nueva instancia '${{ env.GCE_INSTANCE_NAME }}'."
-            gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
-              --project=${{ env.PROJECT_ID }} \
-              --zone=${{ env.GCE_ZONE }} \
-              --machine-type=${{ env.GCE_MACHINE_TYPE }} \
-              --image-family=ubuntu-2204-lts \
-              --image-project=ubuntu-os-cloud \
-              --boot-disk-size=20GB \
-              --boot-disk-type=pd-standard \
-              --tags=http-server,https-server,ssh-go-app \
-              --scopes=https://www.googleapis.com/auth/cloud-platform \
-              --metadata=startup-script="#! /bin/bash
-                sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
-                sudo usermod -aG docker \$(whoami)
-                sudo chmod 666 /var/run/docker.sock
-                echo 'Docker y Docker Compose instalados.'
-                "
-                \
-              --address=go-hardenized-app-ip # ¡Añade esta línea con el nombre de tu IP reservada!
-            sleep 60
+            CURRENT_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
+                          --zone=${{ env.GCE_ZONE }} \
+                          --project=${{ env.PROJECT_ID }} \
+                          --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+            if [ "$CURRENT_IP" != "$RESERVED_IP" ]; then
+              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' existe pero su IP no es la estática esperada. Recreando."
+              gcloud compute instances delete ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --quiet
+              sleep 10
+              gcloud compute instances create ${{ env.GCE_INSTANCE_NAME }} \
+                --project=${{ env.PROJECT_ID }} \
+                --zone=${{ env.GCE_ZONE }} \
+                --machine-type=${{ env.GCE_MACHINE_TYPE }} \
+                --image-family=ubuntu-2204-lts \
+                --image-project=ubuntu-os-cloud \
+                --boot-disk-size=20GB \
+                --boot-disk-type=pd-standard \
+                --tags=http-server,https-server,ssh-go-app \
+                --scopes=https://www.googleapis.com/auth/cloud-platform \
+                --address=${{ env.GCE_STATIC_IP_NAME }} \
+                --network-tier=STANDARD
+              sleep 30 # Tiempo inicial para que la instancia arranque
+            else
+              echo "Instancia '${{ env.GCE_INSTANCE_NAME }}' ya existe y tiene la IP estática asignada."
+            fi
           fi
-          echo "Esperando que la instancia GCE '${{ env.GCE_INSTANCE_NAME }}' esté lista para SSH..."
+          
+          echo "Configurando SSH para gcloud..."
           gcloud compute config-ssh --quiet --project=${{ env.PROJECT_ID }}
 
+          echo "Esperando que la instancia GCE '${{ env.GCE_INSTANCE_NAME }}' esté lista para SSH..."
           ATTEMPTS=0
           MAX_ATTEMPTS=15
-          SLEEP_TIME=20
+          SLEEP_TIME=20 # Segundos entre reintentos
 
           while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
             echo "Intento $((ATTEMPTS + 1)) de $MAX_ATTEMPTS: Probando conexión SSH..."
-            if gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} --zone=${{ env.GCE_ZONE }} --project=${{ env.PROJECT_ID }} --command="echo 'Instancia SSH lista.'" --quiet; then
+            if gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
+                --zone=${{ env.GCE_ZONE }} \
+                --project=${{ env.PROJECT_ID }} \
+                --command="echo 'Instancia SSH lista.'" \
+                --quiet \
+                --ssh-flag="-o StrictHostKeyChecking=no" \
+                --ssh-flag="-o UserKnownHostsFile=/dev/null"; then
               echo "Conexión SSH exitosa."
               break
             else
@@ -232,36 +331,62 @@ jobs:
             exit 1
           fi
 
-          PUBLIC_IP=$(gcloud compute instances describe ${{ env.GCE_INSTANCE_NAME }} \
-            --zone=${{ env.GCE_ZONE }} \
-            --project=${{ env.PROJECT_ID }} \
-            --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
-          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
-          echo "::notice file=README.md::IP pública de la aplicación Hardenized: $PUBLIC_IP"
-
-      - name: Copy docker-compose.prod.yml and Deploy
+      - name: Instalar Docker y Docker Compose en la instancia (si no está instalado)
         run: |
-          IMAGE_TAG="${{ github.sha }}"
-          gcloud compute scp docker-compose.prod.yml cert.pem key.pem ${{ env.GCE_INSTANCE_NAME }}:~/ \
+          gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
             --zone=${{ env.GCE_ZONE }} \
             --project=${{ env.PROJECT_ID }} \
-            --recurse
-
-          gcloud compute ssh ${{ env.GCE_INSTANCE_NAME }} \
-            --zone=${{ env.GCE_ZONE }} \
-            --project=${{ env.PROJECT_ID }} \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            --ssh-flag="-o UserKnownHostsFile=/dev/null" \
             --command="
-              cd ~/ && \
-              gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
-              sed -i 's|__IMAGE_TAG__|${IMAGE_TAG}|g' docker-compose.prod.yml && \
-              docker compose -f docker-compose.prod.yml pull && \
-              docker compose -f docker-compose.prod.yml up -d
+              echo 'Verificando e instalando Docker y Docker Compose si es necesario...'
+              if ! command -v docker &> /dev/null; then
+                  echo 'Instalando Docker...'
+                  sudo apt-get update
+                  sudo apt-get install -y ca-certificates curl gnupg lsb-release
+                  sudo mkdir -p /etc/apt/keyrings
+                  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                  echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+                  sudo apt-get update
+                  sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+                  echo 'Docker instalado.'
+              else
+                  echo 'Docker ya está instalado.'
+              fi
+              if ! command -v docker compose &> /dev/null; then
+                  echo 'Docker Compose (plugin) no encontrado, verificando instalación de docker-compose-plugin.'
+                  sudo apt-get install -y docker-compose-plugin 
+              fi
+              sudo usermod -aG docker \$(whoami) || true
+              newgrp docker || true 
+              echo 'Instalación de Docker/Docker Compose completada.'
             "
 
-      - name: Verify application deployment (Hardenized)
+      - name: Copiar docker-compose.prod.yml y certificados a la instancia
         run: |
-          echo "Esperando que la aplicación Go (Hardenized) se inicie en https://${{ env.PUBLIC_IP }}:80..."
-          sleep 60
-          curl -f -k https://${{ env.PUBLIC_IP }}:80/instruments || \
-            (echo "La aplicación no respondió en el tiempo esperado." && exit 1)
-          echo "Aplicación Go (Hardenized) desplegada y accesible en https://${{ env.PUBLIC_IP }}:80"
+          # Se eliminan los flags SSH explícitos para gcloud compute scp,
+          # ya que gcloud compute config-ssh debería manejar la configuración SSH.
+          gcloud compute scp docker-compose.prod.yml cert/ \
+                              ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }}:~/ \
+                              --zone=${{ env.GCE_ZONE }} \
+                              --project=${{ env.PROJECT_ID }} \
+                              --recurse
+          echo "Archivos copiados a la instancia."
+
+      - name: Actualizar docker-compose.prod.yml y desplegar en la instancia
+        run: |
+          gcloud compute ssh ${{ env.SSH_USER }}@${{ env.GCE_INSTANCE_NAME }} \
+            --zone=${{ env.GCE_ZONE }} \
+            --project=${{ env.PROJECT_ID }} \
+            --ssh-flag="-o StrictHostKeyChecking=no" \
+            --ssh-flag="-o UserKnownHostsFile=/dev/null" \
+            --command="
+              cd ~/ && \
+              sed -i \"s|__IMAGE_TAG__|${{ env.IMAGE_TAG }}|g\" docker-compose.prod.yml && \
+              gcloud auth configure-docker ${{ env.GCR_HOSTNAME }} --quiet && \
+              echo 'Desplegando la aplicación con docker compose...'
+              docker compose -f docker-compose.prod.yml down -v --rmi all || true && \
+              docker compose -f docker-compose.prod.yml pull && \
+              docker compose -f docker-compose.prod.yml up -d
+              echo 'Despliegue completado.'
+            "
